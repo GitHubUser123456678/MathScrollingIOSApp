@@ -71,7 +71,7 @@ async function hfRow(dataset, { where = '', offsetRange = null } = {}) {
 }
 
 // ------------------------------------------------------------------ plain-text maths → HTML
-function textToHtml(text) {
+export function textToHtml(text) {
   // Keep each formula on one line so paragraph/line breaks never split it.
   const flat = String(text || '').trim()
     // Leftover instructions from machine translation in some olympiad problems.
@@ -118,7 +118,7 @@ function parseChoices(problem) {
   }
   return null;
 }
-function answerFor(problem, answer, questionType) {
+export function answerFor(problem, answer, questionType) {
   if (answer == null) return null;
   const a = String(answer).trim();
   if (!a || a === 'null' || /proof/i.test(a)) return null;
@@ -153,40 +153,70 @@ function searchLink(problem, site) {
   return `https://www.google.com/search?q=${encodeURIComponent(`"${words}"${site ? ` site:${site}` : ''}`)}`;
 }
 
-function numinaSource({ source, kind, tag, heading, site, solutionNote }) {
-  return async (settings) => {
-    const { row, index } = await hfRow(NUMINA, { where: numinaWhere(source, settings.topics) });
-    if (!row.problem || row.problem.length < 20) throw new Error('empty problem');
-    return {
-      id: `numina:${source}:${index}`,
-      source: tag,
-      kind,
-      heading: row.problem_type && row.problem_type !== 'unknown' ? `${heading} · ${row.problem_type}` : heading,
-      url: searchLink(row.problem, site),
-      html: textToHtml(row.problem),
-      solutionHtml: row.solution ? textToHtml(row.solution) : null,
-      solutionLabel: 'Solution',
-      solutionNote,
-      answer: answerFor(row.problem, row.answer, row.question_type),
-      isProof: row.question_type === 'proof',
-      base: 'text',
-      dollarMath: true,
-    };
+function numinaCard(row, index, cfg) {
+  return {
+    id: `numina:${row.source}:${index}`,
+    source: cfg.tag,
+    kind: cfg.kind,
+    heading: row.problem_type && row.problem_type !== 'unknown' ? `${cfg.heading} · ${row.problem_type}` : cfg.heading,
+    topic: row.problem_type,
+    url: searchLink(row.problem, cfg.site),
+    html: textToHtml(row.problem),
+    solutionHtml: row.solution ? textToHtml(row.solution) : null,
+    hintHtml: row.solution ? hintFrom(row.solution) : null,
+    solutionLabel: 'Solution',
+    solutionNote: cfg.solutionNote,
+    answer: answerFor(row.problem, row.answer, row.question_type),
+    isProof: row.question_type === 'proof',
+    base: 'text',
+    dollarMath: true,
   };
 }
 
-const amcAime = numinaSource({
-  source: 'amc_aime', kind: 'AMC / AIME', tag: 'contest', heading: 'AMC / AIME', site: 'artofproblemsolving.com',
-  solutionNote: 'Solution from the AoPS Wiki, via the NuminaMath dataset.',
-});
-const aopsForum = numinaSource({
-  source: 'aops_forum', kind: 'AoPS forum', tag: 'aops', heading: 'AoPS', site: 'artofproblemsolving.com',
-  solutionNote: 'From the NuminaMath dataset. Solutions to AoPS forum problems were written up with AI help and can contain mistakes.',
-});
-const olympiad = numinaSource({
-  source: 'olympiads', kind: 'Olympiad', tag: 'olympiad', heading: 'Olympiad',
-  solutionNote: 'From the NuminaMath dataset (olympiad problems and official solutions, translated to English). May contain translation slips.',
-});
+// First sentence or two of a solution, cut where no formula is left open.
+function hintFrom(solution) {
+  const text = String(solution).replace(/^\s*(\[?solution\]?|solution\s*\d*[.:])\s*/i, '').trim();
+  let cut = -1;
+  const re = /[.!?](\s|$)/g;
+  let m;
+  while ((m = re.exec(text))) {
+    const before = text.slice(0, m.index + 1);
+    const dollars = (before.replace(/\\\$/g, '').match(/\$/g) || []).length;
+    const opens = (before.match(/\\[([]/g) || []).length;
+    const closes = (before.match(/\\[)\]]/g) || []).length;
+    if (dollars % 2 === 0 && opens === closes && before.length >= 40) { cut = m.index + 1; break; }
+  }
+  if (cut < 0 || cut > 360) return null;
+  if (cut > text.length * 0.6) return null; // that would give away most of the solution
+  return textToHtml(text.slice(0, cut));
+}
+
+const NUMINA_CFG = {
+  amc_aime: {
+    kind: 'AMC / AIME', tag: 'contest', heading: 'AMC / AIME', site: 'artofproblemsolving.com',
+    solutionNote: 'Solution from the AoPS Wiki, via the NuminaMath dataset.',
+  },
+  aops_forum: {
+    kind: 'AoPS forum', tag: 'aops', heading: 'AoPS', site: 'artofproblemsolving.com',
+    solutionNote: 'From the NuminaMath dataset. Solutions to AoPS forum problems were written up with AI help and can contain mistakes.',
+  },
+  olympiads: {
+    kind: 'Olympiad', tag: 'olympiad', heading: 'Olympiad',
+    solutionNote: 'From the NuminaMath dataset (olympiad problems and official solutions, translated to English). May contain translation slips.',
+  },
+};
+
+function numinaSource(source) {
+  return async (settings) => {
+    const { row, index } = await hfRow(NUMINA, { where: numinaWhere(source, settings.topics) });
+    if (!row.problem || row.problem.length < 20) throw new Error('empty problem');
+    return numinaCard(row, index, NUMINA_CFG[source]);
+  };
+}
+
+const amcAime = numinaSource('amc_aime');
+const aopsForum = numinaSource('aops_forum');
+const olympiad = numinaSource('olympiads');
 
 // ------------------------------------------------------------------ ProofWiki (NaturalProofs)
 // Converts ProofWiki's wiki markup into HTML with $…$ maths for the renderer to typeset.
@@ -239,61 +269,71 @@ function proofWikiToHtml(raw) {
   }).join('');
 }
 
+function proofCard(row) {
+  if (!row.title || !row.text || row.text.length < 30) return null;
+  return {
+    id: `proofwiki:${row.title}`,
+    source: 'proofwiki',
+    kind: 'Theorem · ProofWiki',
+    heading: row.title,
+    url: `https://proofwiki.org/wiki/${encodeURIComponent(row.title.replace(/ /g, '_'))}`,
+    html: proofWikiToHtml(row.text),
+    solutionHtml: row.target ? proofWikiToHtml(row.target) : null,
+    solutionLabel: 'Proof',
+    solutionNote: 'From ProofWiki (CC BY-SA), via the NaturalProofs dataset.',
+    base: 'proofwiki',
+    dollarMath: true,
+  };
+}
+
 async function proofwiki() {
   for (let attempt = 0; attempt < 3; attempt++) {
     const { row } = await hfRow(PROOFS);
-    if (!row.title || !row.text || row.text.length < 30) continue;
-    return {
-      id: `proofwiki:${row.title}`,
-      source: 'proofwiki',
-      kind: 'Theorem · ProofWiki',
-      heading: row.title,
-      url: `https://proofwiki.org/wiki/${encodeURIComponent(row.title.replace(/ /g, '_'))}`,
-      html: proofWikiToHtml(row.text),
-      solutionHtml: row.target ? proofWikiToHtml(row.target) : null,
-      solutionLabel: 'Proof',
-      solutionNote: 'From ProofWiki (CC BY-SA), via the NaturalProofs dataset.',
-      base: 'proofwiki',
-      dollarMath: true,
-    };
+    const card = proofCard(row);
+    if (card) return card;
   }
   throw new Error('no ProofWiki theorem');
 }
 
 // ------------------------------------------------------------------ OEIS
+function oeisCard(row) {
+  const kw = row.keywords || [];
+  if (kw.some((k) => ['dead', 'dumb', 'obsc', 'dupe'].includes(k))) return null;
+  const terms = (row.sequence || []).filter((t) => t !== '');
+  if (terms.length < 5 || !row.sequence_name) return null;
+  const a = row.sequence_id;
+  const refs = (row.cross_references || []).filter((r) => r !== a).slice(0, 12);
+  const nice = kw.includes('nice') || kw.includes('core');
+  const details = [
+    `<h3>About</h3><ul class="plain">`,
+    `<li>Offset: ${escapeHTML(row.offset_a ?? '')}</li>`,
+    kw.length ? `<li>Keywords: ${escapeHTML(kw.filter((k) => k !== 'changed').join(', '))}</li>` : '',
+    row.author ? `<li>Author: ${escapeHTML(row.author)}</li>` : '',
+    `</ul>`,
+    refs.length ? `<h3>Related sequences</h3><p>${refs.map((r) => `<a href="https://oeis.org/${r}">${r}</a>`).join(' · ')}</p>` : '',
+    `<p class="hint">Formulas, comments and proofs are on the sequence's OEIS page — tap <b>Source</b>.</p>`,
+  ].join('');
+  return {
+    id: `oeis:${a}`,
+    source: 'oeis',
+    kind: 'Sequence · OEIS',
+    heading: nice ? `${a} ★` : a,
+    url: `https://oeis.org/${a}`,
+    html: `<p class="oeis-name">${linkifyOEIS(escapeHTML(row.sequence_name))}</p>`,
+    terms: terms.slice(0, 40),
+    solutionHtml: details,
+    solutionLabel: 'More',
+    solutionNote: 'From the OEIS (CC BY-SA), via a Hugging Face mirror.',
+    base: 'oeis',
+  };
+}
+
 async function oeis() {
   for (let attempt = 0; attempt < 4; attempt++) {
     // Low A-numbers are the classic, well-studied sequences; mix those with the rest.
     const { row } = await hfRow(OEIS_DS, { offsetRange: Math.random() < 0.65 ? 40000 : null });
-    const kw = row.keywords || [];
-    if (kw.some((k) => ['dead', 'dumb', 'obsc', 'dupe'].includes(k))) continue;
-    const terms = (row.sequence || []).filter((t) => t !== '');
-    if (terms.length < 5 || !row.sequence_name) continue;
-    const a = row.sequence_id;
-    const refs = (row.cross_references || []).filter((r) => r !== a).slice(0, 12);
-    const nice = kw.includes('nice') || kw.includes('core');
-    const details = [
-      `<h3>About</h3><ul class="plain">`,
-      `<li>Offset: ${escapeHTML(row.offset_a ?? '')}</li>`,
-      kw.length ? `<li>Keywords: ${escapeHTML(kw.filter((k) => k !== 'changed').join(', '))}</li>` : '',
-      row.author ? `<li>Author: ${escapeHTML(row.author)}</li>` : '',
-      `</ul>`,
-      refs.length ? `<h3>Related sequences</h3><p>${refs.map((r) => `<a href="https://oeis.org/${r}">${r}</a>`).join(' · ')}</p>` : '',
-      `<p class="hint">Formulas, comments and proofs are on the sequence's OEIS page — tap <b>Source</b>.</p>`,
-    ].join('');
-    return {
-      id: `oeis:${a}`,
-      source: 'oeis',
-      kind: 'Sequence · OEIS',
-      heading: nice ? `${a} ★` : a,
-      url: `https://oeis.org/${a}`,
-      html: `<p class="oeis-name">${linkifyOEIS(escapeHTML(row.sequence_name))}</p>`,
-      terms: terms.slice(0, 40),
-      solutionHtml: details,
-      solutionLabel: 'More',
-      solutionNote: 'From the OEIS (CC BY-SA), via a Hugging Face mirror.',
-      base: 'oeis',
-    };
+    const card = oeisCard(row);
+    if (card) return card;
   }
   throw new Error('no OEIS sequence');
 }
@@ -317,29 +357,86 @@ function mwURL(params) {
   return `${WIKI_API}?${new URLSearchParams({ format: 'json', formatversion: '2', origin: '*', ...params })}`;
 }
 
+async function wikiCard(title) {
+  const parsed = await getJSON(mwURL({ action: 'parse', page: title, prop: 'text', section: '0', redirects: '1', disableeditsection: '1' }));
+  if (parsed.error) return null;
+  const doc = new DOMParser().parseFromString(parsed.parse.text, 'text/html');
+  doc.querySelectorAll('.infobox, .sidebar, .navbox, .hatnote, .mw-empty-elt, .reference, .metadata, .ambox, table, style, .shortdescription, .mw-references-wrap, figure, .thumb, .noprint').forEach((n) => n.remove());
+  const root = doc.querySelector('.mw-parser-output') || doc.body;
+  if (root.textContent.trim().length < 120) return null;
+  const t = parsed.parse.title || title;
+  return {
+    id: `wiki:${t}`,
+    source: 'wikipedia',
+    kind: 'Concept · Wikipedia',
+    heading: t,
+    url: `https://en.wikipedia.org/wiki/${encodeURIComponent(t.replace(/ /g, '_'))}`,
+    html: root.innerHTML,
+    base: 'wikipedia',
+  };
+}
+
 async function wikipedia() {
   for (let attempt = 0; attempt < 3; attempt++) {
     const search = `incategory:${pick(WIKI_CATEGORY_GROUPS).join('|')}`;
     const data = await getJSON(mwURL({ action: 'query', list: 'search', srsearch: search, srsort: 'random', srlimit: '1', srnamespace: '0', srprop: '' }));
     const title = data.query?.search?.[0]?.title;
     if (!title || /^(List|Lists|Outline|Index|Glossary|Timeline) of/i.test(title)) continue;
-    const parsed = await getJSON(mwURL({ action: 'parse', page: title, prop: 'text', section: '0', redirects: '1', disableeditsection: '1' }));
-    if (parsed.error) continue;
-    const doc = new DOMParser().parseFromString(parsed.parse.text, 'text/html');
-    doc.querySelectorAll('.infobox, .sidebar, .navbox, .hatnote, .mw-empty-elt, .reference, .metadata, .ambox, table, style, .shortdescription, .mw-references-wrap, figure, .thumb, .noprint').forEach((n) => n.remove());
-    const root = doc.querySelector('.mw-parser-output') || doc.body;
-    if (root.textContent.trim().length < 200) continue;
-    return {
-      id: `wiki:${title}`,
-      source: 'wikipedia',
-      kind: 'Concept · Wikipedia',
-      heading: title,
-      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`,
-      html: root.innerHTML,
-      base: 'wikipedia',
-    };
+    const card = await wikiCard(title);
+    if (card) return card;
   }
   throw new Error('no good Wikipedia article');
+}
+
+// ------------------------------------------------------------------ search
+// Runs a keyword search across every source. Calls onGroup(sourceKey, results) as each source answers.
+// Each result: { title, snippet, load: () => Promise<card> }.
+const sq = (q) => q.replace(/'/g, "''").replace(/[%_]/g, ' ');
+function plainSnippet(s, n = 140) {
+  return String(s || '').replace(/\\n(?![a-z])/g, ' ').replace(/\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$\$[\s\S]*?\$\$/g, '…').replace(/\$[^$]*\$/g, '…').replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, '$2').replace(/\s+/g, ' ').trim().slice(0, n);
+}
+async function hfSearch(dataset, where, length = 6) {
+  const data = await getJSON(`${HF}/filter?dataset=${encodeURIComponent(dataset)}&config=default&split=train&where=${encodeURIComponent(where)}&offset=0&length=${length}`, 30000);
+  if (data.error) throw new Error(data.error);
+  return data.rows || [];
+}
+
+export function searchAll(query, onGroup) {
+  const q = query.trim();
+  if (!q) return;
+  const like = `'%${sq(q)}%'`;
+  const jobs = {
+    wikipedia: async () => {
+      const data = await getJSON(mwURL({ action: 'query', list: 'search', srsearch: q, srlimit: '6', srnamespace: '0', srprop: 'snippet' }));
+      return (data.query?.search || []).map((r) => ({
+        title: r.title,
+        snippet: r.snippet.replace(/<[^>]+>/g, ''),
+        load: () => wikiCard(r.title),
+      }));
+    },
+    problems: async () => {
+      const rows = await hfSearch(NUMINA, `"problem" ILIKE ${like} AND "problem_is_valid"='Yes' AND "solution" IS NOT NULL AND ("source"='amc_aime' OR "source"='aops_forum' OR "source"='olympiads')`, 8);
+      return rows.map((r) => ({
+        title: NUMINA_CFG[r.row.source]?.heading || 'Problem',
+        tag: NUMINA_CFG[r.row.source]?.tag || 'olympiad',
+        snippet: plainSnippet(r.row.problem),
+        load: async () => numinaCard(r.row, r.row_idx, NUMINA_CFG[r.row.source] || NUMINA_CFG.olympiads),
+      }));
+    },
+    proofwiki: async () => {
+      const rows = await hfSearch(PROOFS, `"title" ILIKE ${like}`, 6);
+      return rows.map((r) => ({ title: r.row.title, snippet: plainSnippet(r.row.text), load: async () => proofCard(r.row) }));
+    },
+    oeis: async () => {
+      const isId = /^A?\d{1,6}$/i.test(q);
+      const where = isId ? `"sequence_id"='A${q.replace(/^A/i, '').padStart(6, '0')}'` : `"sequence_name" ILIKE ${like}`;
+      const rows = await hfSearch(OEIS_DS, where, 6);
+      return rows.map((r) => ({ title: r.row.sequence_id, snippet: plainSnippet(r.row.sequence_name), load: async () => oeisCard(r.row) }));
+    },
+  };
+  for (const [key, job] of Object.entries(jobs)) {
+    job().then((res) => onGroup(key, res, null)).catch((err) => onGroup(key, [], err));
+  }
 }
 
 export const SOURCES = {
