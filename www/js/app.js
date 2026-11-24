@@ -1,6 +1,7 @@
 import { SOURCES, PROBLEM_TOPICS, escapeHTML, textToHtml, answerFor, searchAll, dailyChallenge, DEFAULT_FILTERS, difficultyToRating, difficultyWindow, WIKI_GROUP_NAMES, numinaByIndex } from './sources.js';
 import { renderContent } from './render.js';
 import * as cloud from './cloud.js';
+import { openGames, mount24, GAMES } from './games.js';
 
 // Where shared post links point. On the website it's the site itself; inside the iOS app it's the public site.
 const PUBLIC_URL = location.protocol === 'https:'
@@ -133,6 +134,8 @@ const BADGES = [
   { id: 'seq1', name: 'Pattern spotter', desc: 'Guess the next term of a sequence', test: () => (state.stats.seqRight || 0) >= 1 },
   { id: 'post1', name: 'Author', desc: 'Write a post', test: () => state.posts.length >= 1 },
   { id: 'save10', name: 'Collector', desc: 'Save 10 cards', test: () => state.saved.length >= 10 },
+  { id: 'gamer', name: 'Gamer', desc: 'Play all four mini-games', test: () => GAMES.every((g) => (state.stats.games || {})[g.id] != null) },
+  { id: 'maker24', name: 'Twenty-four', desc: 'Solve 10 “make 24” puzzles', test: () => (state.stats.solved24 || 0) >= 10 },
   { id: 'duel1', name: 'Duelist', desc: 'Win a duel', test: () => (state.stats.duelsWon || 0) >= 1 },
   { id: 'level10', name: 'Double digits', desc: 'Reach level 10', test: () => levelFor(state.stats.xp || 0) >= 10 },
   { id: 'focus10', name: 'Deep thinker', desc: 'Finish 10 focus problems', test: () => (state.stats.focusDone || 0) >= 10 },
@@ -249,6 +252,7 @@ const QUEST_POOL = [
   { id: 'think5', text: 'Spend 5 minutes thinking on problems', goal: 300, ev: 'think', xp: 30, unit: 's' },
   { id: 'daily', text: 'Solve today’s daily challenge', goal: 1, ev: 'daily', xp: 40 },
   { id: 'cards15', text: 'Look at 15 cards', goal: 15, ev: 'seen', xp: 15 },
+  { id: 'game1', text: 'Play a mini-game', goal: 1, ev: 'game', xp: 20 },
 ];
 // Three quests a day, the same for everyone, picked from the date.
 function questsFor(date) {
@@ -579,6 +583,7 @@ async function postLink(p) {
 const TABS = [
   { id: 'mix', label: 'For you' },
   { id: 'community', label: 'Community' },
+  { id: 'games', label: '🎮 Games' },
   { id: 'contest', label: 'AMC/AIME' },
   { id: 'math', label: 'MATH' },
   { id: 'omni', label: 'Omni' },
@@ -597,9 +602,9 @@ function renderTabs() {
   fb.addEventListener('click', openFilters);
   nav.appendChild(fb);
   for (const t of TABS) {
-    if (t.id === 'community' ? !cloud.cloudEnabled : t.id !== 'mix' && !state.settings.sources[t.id]) continue;
+    if (t.id === 'community' ? !cloud.cloudEnabled : t.id !== 'mix' && t.id !== 'games' && !state.settings.sources[t.id]) continue;
     const b = h(`<button role="tab" class="tab" data-tab="${t.id}" aria-selected="${state.tab === t.id}">${t.label}</button>`);
-    b.addEventListener('click', () => switchTab(t.id));
+    b.addEventListener('click', () => (t.id === 'games' ? openGames(gameCtx) : switchTab(t.id)));
     nav.appendChild(b);
   }
   nav.querySelector('[aria-selected="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
@@ -654,7 +659,9 @@ async function communityCard() {
   return cloudCard(fresh[Math.floor(Math.random() * fresh.length)]);
 }
 
+let sinceGame = 0;
 async function fetchCard() {
+  if (state.tab === 'mix' && ++sinceGame >= 11) { sinceGame = 0; return { id: `game:24:${Date.now()}`, source: 'game', heading: 'Quick 24' }; }
   for (let attempt = 0; attempt < 6; attempt++) {
     const list = activeSources();
     if (!list.length) throw new Error('none');
@@ -778,6 +785,7 @@ const isProblem = (d) => ['contest', 'aops', 'olympiad', 'math', 'omni'].include
 const inList = (key, id) => state[key].some((s) => s.id === id);
 
 function buildCard(data, { standalone = false, onAnswered = null } = {}) {
+  if (data.source === 'game') return buildGameCard(data);
   const meta = metaFor(data);
   const isSaved = inList('saved', data.id);
   const isLiked = inList('liked', data.id);
@@ -2159,6 +2167,52 @@ function openFilters() {
   openSheet('Filters', body, '', apply);
 }
 
+// ------------------------------------------------------------------ mini-games
+const BEST_LABEL = { sumblast: (v) => `${v} pts`, g24: (v) => `${v} solved`, queens: (v) => `${v}×${v}`, rush: (v) => `${v} correct` };
+const gameCtx = {
+  openSheet: (...a) => openSheet(...a), closeSheet: () => closeSheet(), toast: (m) => toast(m), sound: (k) => sound(k), shareText: (t) => shareText(t),
+  bests: () => state.stats.games || {},
+  bestLabel: (id, v) => BEST_LABEL[id](v),
+  recordBest(id, v) {
+    const g = (state.stats.games ||= {});
+    const isBest = g[id] == null || v > g[id];
+    if (g[id] == null || v > g[id]) g[id] = v;
+    saveStats();
+    return isBest && v > 0;
+  },
+  gameDone(id, xp, extra = {}) {
+    if (extra.solved24) state.stats.solved24 = (state.stats.solved24 || 0) + extra.solved24;
+    gainXp(xp);
+    questEvent('game');
+    checkBadges();
+  },
+};
+// A playable "make 24" card that turns up in the feed now and then.
+function buildGameCard(data) {
+  const el = h(`<section class="card s-game" data-id="${escapeHTML(data.id)}"><div class="card-inner">
+      <div class="meta"><span class="pill">Mini-game</span><span class="where">Quick break</span></div>
+      <h2 class="heading">Quick 24</h2>
+      <div class="content"><p class="hint" style="margin-top:0!important">Use all four numbers with + − × ÷ to make 24.</p><div class="slot"></div></div>
+    </div></section>`);
+  const slot = $('.slot', el);
+  let solved = false;
+  const board = mount24(slot, gameCtx, {
+    compact: true,
+    onSolve: () => {
+      if (solved) return;
+      solved = true;
+      const fair = !board.hinted();
+      if (fair) { state.stats.solved24 = (state.stats.solved24 || 0) + 1; gainXp(15, slot); }
+      questEvent('game'); checkBadges();
+      slot.innerHTML = `<div class="feedback ok">${fair ? 'Made 24! +15 XP' : 'Nice — now try one without the hint.'}</div>`;
+      const more = h('<button class="btn ghost small">More games</button>');
+      more.addEventListener('click', () => openGames(gameCtx));
+      slot.appendChild(more);
+    },
+  });
+  return el;
+}
+
 // ------------------------------------------------------------------ progress hub
 let boardTab = 'week';
 function openProgress() {
@@ -2179,6 +2233,7 @@ function openProgress() {
     <div class="league" style="--lc:${leagueFor(st.weekOf === wk ? st.weekXp || 0 : 0)[2]}"><b>${leagueFor(st.weekOf === wk ? st.weekXp || 0 : 0)[0]} league</b><span>${(() => { const w = st.weekOf === wk ? st.weekXp || 0 : 0; const nx = nextLeague(w); return nx ? `${nx[1] - w} XP to ${nx[0]} this week` : 'Top league — amazing!'; })()}</span></div>
     ${st.chests > 0 ? '<button class="btn wide open-chest">🎁 Open a chest</button>' : ''}
     <button class="btn ghost wide duel-go">⚔ Duel a friend</button>
+    <button class="btn ghost wide games-go">🎮 Mini-games</button>
     <h3>Today’s quests</h3>
     <div class="quests">${quests.map((q) => {
       const done = (d.questsDone || []).includes(q.id);
@@ -2238,6 +2293,7 @@ function openProgress() {
   $('.sprint-go', body).addEventListener('click', openSprint);
   $('.open-chest', body)?.addEventListener('click', () => { closeSheet(); openChest(); });
   $('.duel-go', body).addEventListener('click', () => openDuel());
+  $('.games-go', body).addEventListener('click', () => openGames(gameCtx));
   renderBoard();
   openSheet('Your progress', body, 'tall');
 }

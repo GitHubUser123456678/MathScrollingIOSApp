@@ -1,8 +1,8 @@
 // Caches the app shell so MathScroll opens instantly and works offline (content still needs a connection).
-const VERSION = 'mathscroll-v10';
+const VERSION = 'mathscroll-v11';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'js/app.js', 'js/sources.js', 'js/render.js', 'js/cloud.js', 'js/config.js', 'js/asy.js',
+  'js/app.js', 'js/sources.js', 'js/render.js', 'js/cloud.js', 'js/config.js', 'js/asy.js', 'js/games.js',
   'vendor/katex/katex.min.js', 'vendor/katex/katex.min.css',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',
   "vendor/katex/fonts/KaTeX_AMS-Regular.woff2",

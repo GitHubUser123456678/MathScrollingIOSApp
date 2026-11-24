@@ -29,6 +29,7 @@ Why the mirrors? AoPS puts every automated request through a bot check, and Proo
 - **XP & levels**: every solve earns XP (more for harder problems, ×1.5–×2.5 combos for answer streaks), plus a daily sign-in bonus; level-ups with titles from Novice to Legend.
 - **Rewards**: lucky "critical" solves (2× XP), a chest every 5 solves and every level-up (XP, streak freezes, avatar frames, jackpots), "on fire" mode at 5 in a row, sound effects, and an always-visible XP bar.
 - **Leagues**: Bronze → Silver → Gold → Platinum → Diamond → Master by weekly XP.
+- **Mini-games** (🎮 Games tab): *Sum Blast* (drag through touching tiles that add up to the target, Block Blast-style, 90 s), *24* (make 24 from four numbers), *Queens* (the N-queens chess puzzle, 4×4 up to 8×8) and *Mental Math Rush* (60 s). Each gives XP and keeps your best score; a playable *Quick 24* card also turns up in the For you feed now and then.
 - **Duels**: play 5 AMC/AIME problems, send a friend a link with the same five, see who wins (no account needed).
 - **Avatar frames** to collect and equip; a session recap every 30 minutes.
 - **Daily quests**: three a day (the same for everyone); finishing all three gives bonus XP and a streak freeze that protects your day streak.
