@@ -3,28 +3,31 @@
 
 const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
 const rnd = (n) => Math.floor(Math.random() * n);
-import { initial as chessStart, legal as chessLegal, make as chessMake, status as chessStatus, inCheck as chessInCheck, bestMove, LEVELS as CHESS_LEVELS, san as chessSan } from './chess.js';
+import { legal as chessLegal, make as chessMake, inCheck as chessInCheck, san as chessSan, fromFEN, moveFromUci, uciOf } from './chess.js';
 
 export const GAMES = [
-  { id: 'blockblast', name: 'Block Blast', icon: '🧱', blurb: 'Drop blocks, clear rows and columns. Out of room? Solve a problem to keep going.' },
-  { id: 'chess', name: 'Chess', icon: '♞', blurb: 'Play the computer. Spend ⚡ on hints and take-backs.' },
-  { id: 'sumblast', name: 'Sum Blast', icon: '💥', blurb: 'Drag through tiles that add up to the target. 90 seconds.' },
-  { id: 'g24', name: '24', icon: '🎯', blurb: 'Use all four numbers with + − × ÷ to make 24.' },
-  { id: 'queens', name: 'Queens', icon: '♛', blurb: 'Place N queens so no two attack each other.' },
-  { id: 'rush', name: 'Mental Math Rush', icon: '⚡', blurb: 'As many sums as you can in 60 seconds.' },
+  { id: 'blockblast', name: 'Block Blast', icon: '🧱', blurb: 'Drop blocks, clear rows and columns.', cost: '1⚡ per 3 pieces' },
+  { id: 'chess', name: 'Chess Puzzles', icon: '♞', blurb: 'Find the winning move. Puzzles get harder as your rating rises.', cost: '1⚡ per puzzle' },
+  { id: 'sumblast', name: 'Sum Blast', icon: '💥', blurb: 'Drag through tiles that add up to the target. 90 seconds.', cost: '1⚡ per game' },
+  { id: 'g24', name: '24', icon: '🎯', blurb: 'Use all four numbers with + − × ÷ to make 24.', cost: 'Free — it’s maths' },
+  { id: 'queens', name: 'Queens', icon: '♛', blurb: 'Place N queens so no two attack each other.', cost: '1⚡ per board' },
+  { id: 'rush', name: 'Mental Math Rush', icon: '⚡', blurb: 'As many sums as you can in 60 seconds.', cost: 'Free — it’s maths' },
 ];
 
 // ------------------------------------------------------------------ hub
 export function openGames(ctx) {
   const best = ctx.bests();
   const body = el(`<div class="games-hub">${GAMES.map((g) => `
-    <button class="game-tile" data-g="${g.id}"><span class="g-icon">${g.icon}</span><span class="g-text"><b>${g.name}</b><small>${g.blurb}</small>${best[g.id] ? `<em>Best: ${ctx.bestLabel(g.id, best[g.id])}</em>` : ''}</span></button>`).join('')}
-    <p class="small">Every game earns XP. Solve problems to earn ⚡ (you have <b>${ctx.charges()}</b>) for power-ups, hints and second chances.</p></div>`);
+    <button class="game-tile" data-g="${g.id}"><span class="g-icon">${g.icon}</span><span class="g-text"><b>${g.name}</b><small>${g.blurb}</small><span class="g-cost">${g.cost}</span>${best[g.id] ? `<em>Best: ${ctx.bestLabel(g.id, best[g.id])}</em>` : ''}</span></button>`).join('')}
+    <p class="small">You have <b>${ctx.charges()} ⚡</b>. Every problem you get right — in the feed, in Learn, or right here — earns ⚡. Problem difficulty for games: <b>${ctx.gameLevelName()}</b> <button class="link g-level">change</button></p></div>`);
   body.querySelectorAll('.game-tile').forEach((b) => b.addEventListener('click', () => startGame(b.dataset.g, ctx)));
+  body.querySelector('.g-level').addEventListener('click', () => ctx.pickGameLevel(() => openGames(ctx)));
   ctx.openSheet('Games', body, 'tall');
 }
-export function startGame(id, ctx) {
-  ({ blockblast: blockBlast, chess, sumblast: sumBlast, g24: game24, queens, rush })[id](ctx);
+const ENTRY = { sumblast: 'play Sum Blast', queens: 'play Queens' };
+export async function startGame(id, ctx, ...args) {
+  if (ENTRY[id] && !(await payOrSolve(ctx, ENTRY[id]))) return;
+  ({ blockblast: blockBlast, chess, sumblast: sumBlast, g24: game24, queens, rush })[id](ctx, ...args);
 }
 
 // ------------------------------------------------------------------ Sum Blast
@@ -119,7 +122,7 @@ function sumBlast(ctx) {
     const xp = Math.min(80, Math.round(score / 25));
     const isBest = ctx.recordBest('sumblast', score);
     ctx.gameDone('sumblast', xp);
-    showResult(body, ctx, { title: 'Time!', big: score, unit: 'points', line: `${isBest ? 'New best! ' : ''}+${xp} XP`, again: () => sumBlast(ctx), share: `I scored ${score} in Sum Blast on MathScroll. Beat that!` });
+    showResult(body, ctx, { title: 'Time!', big: score, unit: 'points', line: `${isBest ? 'New best! ' : ''}+${xp} XP`, again: () => startGame('sumblast', ctx), share: `I scored ${score} in Sum Blast on MathScroll. Beat that!` });
   };
   const stopSb = () => { over = true; clearInterval(timer); }; stopSb.onReplace = true;
   ctx.openSheet('Sum Blast', body, 'tall', stopSb);
@@ -274,7 +277,7 @@ function queens(ctx, N = null) {
     ctx.recordBest('queens', level);
     ctx.gameDone('queens', xp);
     ctx.sound('level');
-    setTimeout(() => showResult(body, ctx, { title: 'Solved!', big: `${level}×${level}`, unit: '', line: `${secs}s · ${moves} moves · +${xp} XP`, again: level < 8 ? () => queens(ctx, level + 1) : () => queens(ctx, 8), againLabel: level < 8 ? `Try ${level + 1}×${level + 1}` : 'Play again', share: `I solved the ${level}-queens puzzle on MathScroll in ${secs}s!` }), 500);
+    setTimeout(() => showResult(body, ctx, { title: 'Solved!', big: `${level}×${level}`, unit: '', line: `${secs}s · ${moves} moves · +${xp} XP`, again: () => startGame('queens', ctx, Math.min(8, level + 1)), againLabel: level < 8 ? `Try ${level + 1}×${level + 1}` : 'Play again', share: `I solved the ${level}-queens puzzle on MathScroll in ${secs}s!` }), 500);
   };
   body.querySelector('.q-clear').addEventListener('click', () => { Q = new Set(); render(); });
   body.querySelector('.q-easier')?.addEventListener('click', () => queens(ctx, level - 1));
@@ -359,13 +362,12 @@ export function askProblem(ctx, { title, reason }) {
   return new Promise((resolve) => {
     const ov = el(`<div class="g-problem"><div class="gp-head"><b>${title}</b><button class="btn ghost small gp-x">Cancel</button></div><p class="small gp-why">${reason}</p><div class="gp-body sprint-stage"><p class="loader-msg">Finding a problem…</p></div></div>`);
     document.body.appendChild(ov);
-    let answered = false;
-    const close = () => ov.remove();
-    ov.querySelector('.gp-x').addEventListener('click', () => { close(); if (!answered) resolve(null); });
+    let result = null; let closed = false;
+    const close = () => { if (closed) return; closed = true; ov.remove(); resolve(result); };
+    ov.querySelector('.gp-x').addEventListener('click', close);
     ctx.problem(ov.querySelector('.gp-body')).then((ok) => {
-      answered = true;
-      resolve(ok);
-      const x = ov.querySelector('.gp-x'); x.textContent = 'Continue'; x.classList.remove('ghost');
+      result = ok;
+      const x = ov.querySelector('.gp-x'); x.textContent = ok ? 'Continue' : 'Try another'; x.classList.remove('ghost');
       if (ok) setTimeout(close, 1300);
     }, () => { ov.querySelector('.gp-body').innerHTML = '<p class="loader-msg">Couldn’t load a problem. Check your connection.</p>'; });
   });
@@ -379,6 +381,15 @@ function wireCharge(body, ctx) {
     if (ok) ctx.toast('+1 ⚡');
   }));
   return refresh;
+}
+// Spend a charge, or solve problems until you've earned one. Resolves false if you give up.
+export async function payOrSolve(ctx, what) {
+  while (!ctx.spend(1)) {
+    const ok = await askProblem(ctx, { title: 'Need ⚡', reason: `It costs 1 ⚡ to ${what}. Solve this problem to earn it.` });
+    if (ok === null) return false;
+    if (!ok) ctx.toast('Not quite — here’s another one');
+  }
+  return true;
 }
 function spend(ctx, refresh, what) {
   if (ctx.spend(1)) { refresh(); return true; }
@@ -410,8 +421,8 @@ function blockBlast(ctx) {
     <div class="bb-combo"></div>
     <div class="bb-board"></div>
     <div class="bb-tray"></div>
-    <div class="gb-actions"><button class="btn ghost small bb-bomb">💣 Bomb · 1⚡</button><button class="btn ghost small bb-reroll">🔄 New pieces · 1⚡</button></div>
-    <p class="small bb-help">Drag a piece onto the board. Fill a whole row or column to clear it.</p></div>`);
+    <div class="gb-actions"><button class="btn ghost small bb-bomb">💣 Bomb · 1⚡</button><button class="btn ghost small bb-reroll">🔄 Swap pieces · 1⚡</button></div>
+    <p class="small bb-help">Drag a piece onto the board. Fill a whole row or column to clear it. Every three pieces cost 1 ⚡.</p></div>`);
   const refresh = wireCharge(body, ctx);
   const boardEl = body.querySelector('.bb-board'); const trayEl = body.querySelector('.bb-tray');
   for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) boardEl.appendChild(el(`<div class="bb-cell" data-r="${r}" data-c="${c}"></div>`));
@@ -424,6 +435,11 @@ function blockBlast(ctx) {
       const e = cellEl(r, c); const v = board[r][c];
       e.style.background = v || ''; e.classList.toggle('full', !!v);
     }
+  };
+  // Each new set of three pieces costs 1 ⚡ (solve a problem if you're out).
+  const buyTray = async () => {
+    refresh();
+    if (await payOrSolve(ctx, 'get the next three pieces')) { newTray(); refresh(); checkStuck(); } else { trayEl.innerHTML = '<button class="btn wide bb-buy">Solve a problem for the next pieces</button>'; trayEl.querySelector('.bb-buy').addEventListener('click', buyTray); }
   };
   const newTray = () => {
     for (let tries = 0; tries < 30; tries++) {
@@ -478,11 +494,12 @@ function blockBlast(ctx) {
     score += gained;
     body.querySelector('.gb-score').textContent = score;
     setTimeout(drawBoard, lines ? 300 : 0); if (!lines) drawBoard();
-    if (tray.every((x) => !x)) newTray(); else drawTray();
+    if (tray.every((x) => !x)) { drawTray(); setTimeout(buyTray, lines ? 400 : 150); return; }
+    drawTray();
     setTimeout(checkStuck, lines ? 320 : 50);
   };
   const checkStuck = () => {
-    if (over) return;
+    if (over || tray.every((p) => !p)) return;
     drawTray();
     if (tray.some((p) => p && fitsAnywhere(p.shape))) return;
     stuck();
@@ -514,7 +531,7 @@ function blockBlast(ctx) {
     const xp = Math.min(120, Math.round(score / 15));
     const isBest = ctx.recordBest('blockblast', score);
     ctx.gameDone('blockblast', xp);
-    showResult(body, ctx, { title: 'Game over', big: score, unit: 'points', line: `${isBest ? 'New best! ' : ''}+${xp} XP`, again: () => blockBlast(ctx), share: `I scored ${score} in Block Blast on MathScroll. Beat that!` });
+    showResult(body, ctx, { title: 'Game over', big: score, unit: 'points', line: `${isBest ? 'New best! ' : ''}+${xp} XP`, again: () => startGame('blockblast', ctx), share: `I scored ${score} in Block Blast on MathScroll. Beat that!` });
   };
   // ---- dragging
   let drag = null;
@@ -577,124 +594,119 @@ function blockBlast(ctx) {
     if (over || !spend(ctx, refresh, 'New pieces')) return;
     newTray(); ctx.sound('quest');
   });
-  newTray(); drawBoard();
+  tray = [null, null, null]; drawTray(); drawBoard();
   const stop = () => { over = true; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); drag?.f.remove(); };
   stop.onReplace = true;
   ctx.openSheet('Block Blast', body, 'tall', stop);
+  buyTray();
   body._test = { board: () => board, tray: () => tray, place, fits };
 }
 
-// ------------------------------------------------------------------ Chess
+// ------------------------------------------------------------------ Chess puzzles
 const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
 const glyph = (p) => `<span class="cp ${p >= 'A' && p <= 'Z' ? 'w' : 'b'}">${GLYPH[p.toLowerCase()]}︎</span>`;
-function chess(ctx, levelIdx = null) {
-  if (levelIdx === null) {
-    const beaten = ctx.bests().chess || 0;
-    const pick = el(`<div class="chess-pick"><p>Choose your opponent. You play white.</p>
-      ${CHESS_LEVELS.map((L, i) => `<button class="game-tile" data-l="${i}"><span class="g-icon">${['♙', '♘', '♗', '♕'][i]}</span><span class="g-text"><b>${L.name}</b><small>Win: +${L.xp} XP</small>${beaten > i ? '<em>Beaten ✓</em>' : ''}</span></button>`).join('')}
-      <p class="small">Stuck? 💡 hints and ↶ take-backs cost 1 ⚡. Earn ⚡ by solving problems (here or in the feed).</p></div>`);
-    pick.querySelectorAll('[data-l]').forEach((b) => b.addEventListener('click', () => chess(ctx, +b.dataset.l)));
-    ctx.openSheet('Chess', pick, 'tall');
-    return;
-  }
-  const L = CHESS_LEVELS[levelIdx];
-  let s = chessStart(); let hist = []; let sans = []; let sel = null; let last = null; let hint = null; let thinking = false; let over = false;
+const THEME_NAMES = { mateIn1: 'Mate in 1', mateIn2: 'Mate in 2', mateIn3: 'Mate in 3', fork: 'Fork', pin: 'Pin', skewer: 'Skewer', hangingPiece: 'Hanging piece', discoveredAttack: 'Discovered attack', sacrifice: 'Sacrifice', promotion: 'Promotion', endgame: 'Endgame', backRankMate: 'Back-rank mate', deflection: 'Deflection', attraction: 'Attraction', trappedPiece: 'Trapped piece', doubleCheck: 'Double check' };
+async function chess(ctx) {
+  if (!(await payOrSolve(ctx, 'play a chess puzzle'))) return;
+  const rating = ctx.puzzleRating();
   const body = el(`<div class="chess">
-    <div class="gb-top"><span class="ch-vs">vs ${L.name}</span><span class="ch-status"></span>${chargePill(ctx)}</div>
-    <div class="ch-cap ch-cap-b"></div>
+    <div class="gb-top"><span class="ch-vs">Rating <b class="ch-rating">${rating}</b></span><span class="ch-status">Loading puzzle…</span>${chargePill(ctx)}</div>
+    <div class="ch-cap ch-tags"></div>
     <div class="ch-board"></div>
-    <div class="ch-cap ch-cap-w"></div>
-    <div class="gb-actions"><button class="btn ghost small ch-hint">💡 Hint · 1⚡</button><button class="btn ghost small ch-undo">↶ Take back · 1⚡</button><button class="btn ghost small ch-resign">Resign</button></div>
-    <div class="ch-moves small"></div></div>`);
+    <div class="gb-actions"><button class="btn ghost small ch-hint">💡 Hint · 1⚡</button><button class="btn ghost small ch-sol" hidden>Show solution</button><button class="btn small ch-next" hidden>Next puzzle · 1⚡</button></div>
+    <p class="small ch-moves"></p></div>`);
   const refresh = wireCharge(body, ctx);
   const boardEl = body.querySelector('.ch-board');
-  const setStatus = (t) => { body.querySelector('.ch-status').textContent = t; };
-  const captured = () => {
-    const start = { p: 8, n: 2, b: 2, r: 2, q: 1 };
-    const count = (ch) => s.b.filter((x) => x === ch).length;
-    const lost = (white) => Object.keys(start).flatMap((t) => Array(Math.max(0, start[t] - count(white ? t.toUpperCase() : t))).fill(white ? t.toUpperCase() : t));
-    body.querySelector('.ch-cap-b').innerHTML = lost(true).map(glyph).join(''); // white pieces taken by black
-    body.querySelector('.ch-cap-w').innerHTML = lost(false).map(glyph).join('');
-  };
+  const setStatus = (t, cls = '') => { const e = body.querySelector('.ch-status'); e.textContent = t; e.className = `ch-status ${cls}`; };
+  let s = null; let moves = []; let step = 1; let sel = null; let last = null; let hint = null; let flip = false; let done = false; let failed = false; let busy = true; let puzzle = null; let sans = [];
+  ctx.openSheet('Chess puzzle', body, 'tall', Object.assign(() => { done = true; }, { onReplace: true }));
+  try { puzzle = await ctx.chessPuzzle(rating); } catch {
+    setStatus('Couldn’t load a puzzle — check your connection'); ctx.refund(1); refresh(); return;
+  }
+  s = fromFEN(puzzle.fen); moves = puzzle.moves;
+  flip = s.w; // the opponent moves first, so you play the other colour
+  body.querySelector('.ch-tags').innerHTML = (puzzle.themes || []).filter((t) => THEME_NAMES[t]).slice(0, 3).map((t) => `<span class="pill">${THEME_NAMES[t]}</span>`).join(' ') + ` <span class="small">Puzzle ${puzzle.rating}</span>`;
   const render = () => {
     boardEl.innerHTML = '';
-    const moves = sel !== null ? chessLegal(s).filter((m) => m.from === sel) : [];
+    const targets = sel !== null && !busy ? chessLegal(s).filter((m) => m.from === sel) : [];
     const checkSq = chessInCheck(s) ? s.b.indexOf(s.w ? 'K' : 'k') : -1;
-    for (let i = 0; i < 64; i++) {
-      const r = i >> 3; const c = i & 7;
-      const tgt = moves.find((m) => m.to === i);
-      const cls = ['ch-sq', (r + c) % 2 ? 'dark' : 'light', sel === i ? 'ch-sel' : '', last && (last.from === i || last.to === i) ? 'ch-last' : '', tgt ? (s.b[i] !== '.' || tgt.epCap != null ? 'tg-cap' : 'tg-dot') : '', i === checkSq ? 'ch-check' : '', hint && (hint.from === i || hint.to === i) ? 'ch-hintsq' : ''].filter(Boolean).join(' ');
-      const sq = el(`<button class="${cls}" data-i="${i}" aria-label="${'abcdefgh'[c]}${8 - r}">${s.b[i] !== '.' ? glyph(s.b[i]) : ''}${c === 0 ? `<small class="rk">${8 - r}</small>` : ''}${r === 7 ? `<small class="fl">${'abcdefgh'[c]}</small>` : ''}</button>`);
-      boardEl.appendChild(sq);
+    for (let d = 0; d < 64; d++) {
+      const i = flip ? 63 - d : d; const r = i >> 3; const c = i & 7; const dr = d >> 3; const dc = d & 7;
+      const tgt = targets.find((m) => m.to === i);
+      const cls = ['ch-sq', (r + c) % 2 ? 'dark' : 'light', sel === i ? 'ch-sel' : '', last && (last.from === i || last.to === i) ? 'ch-last' : '', tgt ? (s.b[i] !== '.' || tgt.epCap != null ? 'tg-cap' : 'tg-dot') : '', i === checkSq ? 'ch-check' : '', hint === i ? 'ch-hintsq' : ''].filter(Boolean).join(' ');
+      boardEl.appendChild(el(`<button class="${cls}" data-i="${i}">${s.b[i] !== '.' ? glyph(s.b[i]) : ''}${dc === 0 ? `<small class="rk">${8 - r}</small>` : ''}${dr === 7 ? `<small class="fl">${'abcdefgh'[c]}</small>` : ''}</button>`));
     }
-    captured();
-    const pairs = []; for (let k = 0; k < sans.length; k += 2) pairs.push(`${k / 2 + 1}. ${sans[k]}${sans[k + 1] ? ` ${sans[k + 1]}` : ''}`);
-    body.querySelector('.ch-moves').textContent = pairs.slice(-6).join('   ');
+    body.querySelector('.ch-moves').textContent = sans.join('  ');
   };
-  const finish = (result) => {
-    over = true;
-    const xp = result === 'win' ? L.xp : result === 'draw' ? Math.round(L.xp / 2) : 5;
-    if (result === 'win') ctx.recordBest('chess', levelIdx + 1); else ctx.recordBest('chess', 0);
+  const play = (m) => { sans.push(chessSan(s, m)); s = chessMake(s, m); last = m; sel = null; hint = null; ctx.sound(m.cap !== '.' ? 'correct' : 'quest'); };
+  const you = () => (flip ? 'Black' : 'White');
+  const finish = (solved) => {
+    done = true; busy = true;
+    const res = ctx.puzzleResult(puzzle.rating, solved);
+    body.querySelector('.ch-rating').textContent = `${res.rating} (${res.delta >= 0 ? '+' : ''}${res.delta})`;
+    const xp = solved ? Math.max(10, Math.min(40, Math.round((puzzle.rating - 400) / 60))) : 2;
+    ctx.recordBest('chess', res.rating);
     ctx.gameDone('chess', xp);
-    ctx.sound(result === 'win' ? 'level' : result === 'draw' ? 'quest' : 'wrong');
-    const title = result === 'win' ? 'Checkmate — you win!' : result === 'draw' ? 'Draw' : 'You lost';
+    if (solved) { setStatus(`Solved! +${xp} XP`, 'ok'); ctx.sound('level'); } else setStatus('Puzzle failed', 'no');
+    body.querySelector('.ch-hint').hidden = true;
+    body.querySelector('.ch-next').hidden = false;
+    body.querySelector('.ch-sol').hidden = solved;
+    render();
+  };
+  const opponent = () => {
+    busy = true; render();
     setTimeout(() => {
-      const panel = el(`<div class="bb-stuck ch-end"><b>${title}</b><p>${sans.length} moves · +${xp} XP</p>
-        ${result === 'win' && levelIdx < CHESS_LEVELS.length - 1 ? `<button class="btn wide next">Play ${CHESS_LEVELS[levelIdx + 1].name}</button>` : '<button class="btn wide next">Play again</button>'}
-        <button class="btn ghost wide share-c">Share</button><button class="btn ghost wide more-g">More games</button></div>`);
-      body.appendChild(panel);
-      panel.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      panel.querySelector('.next').addEventListener('click', () => chess(ctx, result === 'win' ? Math.min(levelIdx + 1, CHESS_LEVELS.length - 1) : levelIdx));
-      panel.querySelector('.share-c').addEventListener('click', () => ctx.shareText(result === 'win' ? `I beat the ${L.name} bot at chess on MathScroll in ${Math.ceil(sans.length / 2)} moves!` : `Playing chess on MathScroll — the ${L.name} bot is tough.`));
-      panel.querySelector('.more-g').addEventListener('click', () => openGames(ctx));
-    }, 700);
+      if (done && !failed) return;
+      const m = moveFromUci(s, moves[step - 1]);
+      if (m) play(m);
+      busy = false;
+      if (step >= moves.length) return finish(true);
+      setStatus(`${you()} to move — find the best move`); render();
+    }, step === 1 ? 700 : 450);
   };
-  const afterMove = () => {
-    const st = chessStatus(s);
-    if (st === 'mate') { setStatus('Checkmate'); render(); finish(s.w ? 'loss' : 'win'); return true; }
-    if (st) { setStatus(st === 'stalemate' ? 'Stalemate' : 'Draw'); render(); finish('draw'); return true; }
-    setStatus(chessInCheck(s) ? 'Check!' : s.w ? 'Your move' : 'Thinking…');
-    return false;
-  };
-  const doMove = (m) => {
-    hist.push(s); sans.push(chessSan(s, m));
-    s = chessMake(s, m); last = m; sel = null; hint = null;
-    ctx.sound(m.cap !== '.' ? 'correct' : 'quest');
-  };
-  const botMove = () => {
-    thinking = true; setStatus('Thinking…'); render();
-    setTimeout(() => {
-      if (over) return;
-      const m = bestMove(s, L.depth, L.noise);
-      thinking = false;
-      if (m) doMove(m);
-      if (!afterMove()) render();
-    }, 350);
-  };
+  render(); setStatus('Watch the opponent’s move…');
+  opponent();
   boardEl.addEventListener('click', (e) => {
-    const sq = e.target.closest('.ch-sq'); if (!sq || over || thinking || !s.w) return;
+    const sq = e.target.closest('.ch-sq'); if (!sq || busy || done) return;
     const i = +sq.dataset.i;
     if (sel !== null) {
       const m = chessLegal(s).find((x) => x.from === sel && x.to === i);
-      if (m) { doMove(m); if (!afterMove()) botMove(); else render(); return; }
+      if (m) {
+        const want = moves[step];
+        const exp = moveFromUci(s, want);
+        const mine = uciOf(m);
+        const right = mine === want || (mine.slice(0, 4) === want.slice(0, 4)) || (step === moves.length - 1 && chessLegal(chessMake(s, m)).length === 0 && chessInCheck(chessMake(s, m)));
+        if (right) {
+          play(exp && mine.slice(0, 4) === want.slice(0, 4) ? exp : m);
+          step += 2;
+          if (step - 1 >= moves.length) return finish(true);
+          setStatus('Correct! Keep going…', 'ok');
+          opponent();
+        } else {
+          failed = true; sel = null;
+          ctx.sound('wrong');
+          boardEl.classList.remove('shake'); void boardEl.offsetWidth; boardEl.classList.add('shake');
+          hint = exp ? exp.from : null;
+          finish(false);
+          setStatus('Not the best move', 'no');
+        }
+        return;
+      }
     }
-    sel = s.b[i] !== '.' && s.b[i] >= 'A' && s.b[i] <= 'Z' && sel !== i ? i : null;
+    const p = s.b[i];
+    sel = p !== '.' && (p >= 'A' && p <= 'Z') === s.w && sel !== i ? i : null;
     render();
   });
   body.querySelector('.ch-hint').addEventListener('click', () => {
-    if (over || thinking || !s.w || !spend(ctx, refresh, 'A hint')) return;
-    setStatus('Finding a good move…');
-    setTimeout(() => { hint = bestMove(s, Math.max(2, Math.min(3, L.depth + 1)), 0); sel = hint ? hint.from : null; setStatus('Try the highlighted move'); render(); }, 50);
+    if (busy || done || !spend(ctx, refresh, 'A hint')) return;
+    const m = moveFromUci(s, moves[step]); hint = m ? m.from : null; sel = hint; setStatus('Move this piece'); render();
   });
-  body.querySelector('.ch-undo').addEventListener('click', () => {
-    if (over || thinking || hist.length < 2) return;
-    if (!spend(ctx, refresh, 'A take-back')) return;
-    s = hist[hist.length - 2]; hist = hist.slice(0, -2); sans = sans.slice(0, -2); last = null; sel = null; hint = null;
-    setStatus('Your move'); render();
+  body.querySelector('.ch-sol').addEventListener('click', () => {
+    // Replay the rest of the solution from where you went wrong.
+    body.querySelector('.ch-sol').hidden = true;
+    const rest = moves.slice(step); let k = 0;
+    const tick = () => { if (k >= rest.length || !body.isConnected) return; const m = moveFromUci(s, rest[k++]); if (m) play(m); hint = null; render(); setTimeout(tick, 700); };
+    tick();
   });
-  body.querySelector('.ch-resign').addEventListener('click', () => { if (!over && hist.length) finish('loss'); else if (!over) chess(ctx); });
-  setStatus('Your move'); render();
-  const stop = () => { over = true; }; stop.onReplace = true;
-  ctx.openSheet(`Chess · ${L.name}`, body, 'tall', stop);
-  body._test = { state: () => s, setState: (x) => { s = x; render(); } };
+  body.querySelector('.ch-next').addEventListener('click', () => startGame('chess', ctx));
 }

@@ -800,6 +800,30 @@ const ratedEligible = (min, max) => (settings) => {
 };
 const problemsOnlyFilter = (settings) => (settings.filters?.qtype || 'any') === 'any' && !settings.filters?.checkable;
 
+// A checkable MATH problem from one subject (config, or any) at one or more levels — used by Learn and the games.
+export const MATH_SUBJECTS = MATH_NAMES;
+export async function mathProblem({ config = null, levels = [3] } = {}) {
+  const configs = Object.keys(MATH_CONFIGS);
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const cfg = config || configs[Math.floor(Math.random() * configs.length)];
+    const split = Math.random() < 0.6 ? 'train' : 'test';
+    const where = `(${levels.map((l) => `"level"='Level ${l}'`).join(' OR ')})`;
+    const { row, index } = await hfRow(MATH_DS, { config: cfg, split, where });
+    if (!row.problem) continue;
+    const card = mathCard(row, cfg, index, split);
+    if (isCheckable(card)) return card;
+  }
+  throw new Error('no matching problem');
+}
+
+// ------------------------------------------------------------------ chess puzzles (Lichess, CC0)
+// A random well-liked puzzle near the given rating. Moves[0] is the opponent's move; you play Moves[1], [3], ...
+export async function chessPuzzle(rating = 1000) {
+  const lo = Math.max(400, Math.min(2800, Math.round(rating / 100) * 100 - 50));
+  const { row } = await hfRow('Lichess/chess-puzzles', { where: `"Rating">=${lo} AND "Rating"<${lo + 100} AND "Popularity">=85`, offsetRange: 20000 });
+  return { id: row.PuzzleId, fen: row.FEN, moves: row.Moves.trim().split(/\s+/), rating: row.Rating, themes: row.Themes || [] };
+}
+
 export const SOURCES = {
   contest: { label: 'AMC & AIME', short: 'AMC/AIME', fetch: amcAime, blurb: '5,000+ problems with AoPS Wiki solutions', problems: true, eligible: unratedEligible('contest') },
   math: { label: 'MATH dataset', short: 'MATH', fetch: mathSource, blurb: '12,500 competition problems, levels 1–5', problems: true, eligible: ratedEligible(1, 4) },

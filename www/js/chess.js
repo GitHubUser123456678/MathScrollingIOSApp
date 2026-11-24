@@ -208,3 +208,25 @@ export function san(s, m) {
   if (inCheck(n)) str += legal(n).length ? '+' : '#';
   return str;
 }
+
+// ------------------------------------------------------------------ puzzles (FEN positions, UCI moves)
+export function fromFEN(fen) {
+  const [pos, side, cas = '-', ep = '-', half = '0'] = fen.trim().split(/\s+/);
+  const b = [];
+  for (const ch of pos.replace(/\//g, '')) { if (/\d/.test(ch)) b.push(...'.'.repeat(+ch)); else b.push(ch); }
+  return {
+    b, w: side === 'w',
+    castle: { K: cas.includes('K'), Q: cas.includes('Q'), k: cas.includes('k'), q: cas.includes('q') },
+    ep: ep === '-' ? -1 : (8 - Number(ep[1])) * 8 + FILES.indexOf(ep[0]),
+    half: Number(half) || 0,
+  };
+}
+const sqIndex = (name) => (8 - Number(name[1])) * 8 + FILES.indexOf(name[0]);
+export const uciOf = (m) => `${sqName(m.from)}${sqName(m.to)}${m.promo && m.promo.toLowerCase() !== 'q' ? m.promo.toLowerCase() : ''}`;
+// The legal move matching a UCI string like "e7e8n" (null if illegal).
+export function moveFromUci(s, uci) {
+  const from = sqIndex(uci.slice(0, 2)); const to = sqIndex(uci.slice(2, 4)); const pr = uci[4];
+  const m = legal(s).find((x) => x.from === from && x.to === to);
+  if (!m) return null;
+  return pr && m.promo ? { ...m, promo: s.w ? pr.toUpperCase() : pr.toLowerCase() } : m;
+}

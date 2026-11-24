@@ -1,7 +1,8 @@
-import { SOURCES, PROBLEM_TOPICS, escapeHTML, textToHtml, answerFor, searchAll, dailyChallenge, DEFAULT_FILTERS, difficultyToRating, difficultyWindow, WIKI_GROUP_NAMES, numinaByIndex } from './sources.js';
+import { SOURCES, PROBLEM_TOPICS, escapeHTML, textToHtml, answerFor, searchAll, dailyChallenge, DEFAULT_FILTERS, difficultyToRating, difficultyWindow, WIKI_GROUP_NAMES, numinaByIndex, mathProblem, chessPuzzle, MATH_SUBJECTS } from './sources.js';
 import { renderContent } from './render.js';
 import * as cloud from './cloud.js';
 import { openGames, mount24, GAMES } from './games.js';
+import { openLearn } from './learn.js';
 
 // Where shared post links point. On the website it's the site itself; inside the iOS app it's the public site.
 const PUBLIC_URL = location.protocol === 'https:'
@@ -134,6 +135,9 @@ const BADGES = [
   { id: 'seq1', name: 'Pattern spotter', desc: 'Guess the next term of a sequence', test: () => (state.stats.seqRight || 0) >= 1 },
   { id: 'post1', name: 'Author', desc: 'Write a post', test: () => state.posts.length >= 1 },
   { id: 'save10', name: 'Collector', desc: 'Save 10 cards', test: () => state.saved.length >= 10 },
+  { id: 'learner', name: 'Scholar', desc: 'Finish 10 Learn lessons', test: () => (state.stats.learn?.lessons || 0) >= 10 },
+  { id: 'unit1', name: 'Unit cleared', desc: 'Pass a unit test in Learn', test: () => Object.values(state.stats.learn?.done || {}).some((d) => d >= 5) },
+  { id: 'puzzler', name: 'Tactician', desc: 'Solve 10 chess puzzles', test: () => (state.stats.puzzlesSolved || 0) >= 10 },
   { id: 'gamer', name: 'Gamer', desc: 'Play every mini-game', test: () => GAMES.every((g) => (state.stats.games || {})[g.id] != null) },
   { id: 'maker24', name: 'Twenty-four', desc: 'Solve 10 “make 24” puzzles', test: () => (state.stats.solved24 || 0) >= 10 },
   { id: 'duel1', name: 'Duelist', desc: 'Win a duel', test: () => (state.stats.duelsWon || 0) >= 1 },
@@ -253,6 +257,8 @@ const QUEST_POOL = [
   { id: 'daily', text: 'Solve today’s daily challenge', goal: 1, ev: 'daily', xp: 40 },
   { id: 'cards15', text: 'Look at 15 cards', goal: 15, ev: 'seen', xp: 15 },
   { id: 'game1', text: 'Play a mini-game', goal: 1, ev: 'game', xp: 20 },
+  { id: 'lesson1', text: 'Finish a Learn lesson', goal: 1, ev: 'lesson', xp: 25 },
+  { id: 'lesson3', text: 'Finish 3 Learn lessons', goal: 3, ev: 'lesson', xp: 50 },
 ];
 // Three quests a day, the same for everyone, picked from the date.
 function questsFor(date) {
@@ -583,6 +589,7 @@ async function postLink(p) {
 const TABS = [
   { id: 'mix', label: 'For you' },
   { id: 'community', label: 'Community' },
+  { id: 'learn', label: '🎓 Learn' },
   { id: 'games', label: '🎮 Games' },
   { id: 'contest', label: 'AMC/AIME' },
   { id: 'math', label: 'MATH' },
@@ -602,9 +609,9 @@ function renderTabs() {
   fb.addEventListener('click', openFilters);
   nav.appendChild(fb);
   for (const t of TABS) {
-    if (t.id === 'community' ? !cloud.cloudEnabled : t.id !== 'mix' && t.id !== 'games' && !state.settings.sources[t.id]) continue;
+    if (t.id === 'community' ? !cloud.cloudEnabled : t.id !== 'mix' && t.id !== 'games' && t.id !== 'learn' && !state.settings.sources[t.id]) continue;
     const b = h(`<button role="tab" class="tab" data-tab="${t.id}" aria-selected="${state.tab === t.id}">${t.label}</button>`);
-    b.addEventListener('click', () => (t.id === 'games' ? openGames(gameCtx) : switchTab(t.id)));
+    b.addEventListener('click', () => (t.id === 'games' ? openGames(gameCtx) : t.id === 'learn' ? openLearn(learnCtx) : switchTab(t.id)));
     nav.appendChild(b);
   }
   nav.querySelector('[aria-selected="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
@@ -2009,13 +2016,33 @@ async function answerableProblem() {
   }
   throw new Error('no problems');
 }
-// A problem with a checkable answer for games: mostly MATH (shorter), sometimes AMC/AIME.
+// How hard the problems you solve to earn ⚡ are (Games → change).
+const GAME_LEVELS = {
+  easy: { name: 'Easy', desc: 'MATH levels 1–2: quick warm-ups', levels: [1, 2] },
+  medium: { name: 'Medium', desc: 'MATH levels 3–4: a minute or two each', levels: [3, 4] },
+  hard: { name: 'Hard', desc: 'MATH level 5 and AMC problems', levels: [5], contest: [3, 5.5] },
+  expert: { name: 'Expert', desc: 'Hard AMC and AIME problems', contest: [5, 8] },
+};
+function pickGameLevel(done) {
+  const cur = state.settings.gameLevel || 'medium';
+  const body = h(`<div class="chess-pick"><p>How hard should the problems be that earn ⚡ for games?</p>${Object.entries(GAME_LEVELS).map(([k, v]) => `<button class="game-tile ${k === cur ? 'on' : ''}" data-k="${k}"><span class="g-text"><b>${v.name}${k === cur ? ' ✓' : ''}</b><small>${v.desc}</small></span></button>`).join('')}</div>`);
+  body.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => { state.settings.gameLevel = b.dataset.k; saveSettings(); toast(`Game problems: ${GAME_LEVELS[b.dataset.k].name}`); done?.(); }));
+  openSheet('Game problem difficulty', body, 'tall');
+}
+async function contestBetween([lo, hi]) {
+  const fs = { ...fetchSettings(), filters: { ...(state.settings.filters || {}), dmin: lo, dmax: hi, matchLevel: false, checkable: true, qtype: 'any' } };
+  for (let i = 0; i < 6; i++) {
+    try { const c = await SOURCES.contest.fetch(fs); if (c.answer && (c.answer.type === 'choice' || c.answer.type === 'numeric')) return c; } catch { /* again */ }
+  }
+  throw new Error('no problems');
+}
+// A problem with a checkable answer for games, at the chosen difficulty.
 async function quickProblem() {
-  for (let i = 0; i < 8; i++) {
+  const L = GAME_LEVELS[state.settings.gameLevel || 'medium'];
+  for (let i = 0; i < 3; i++) {
     try {
-      const src = i % 2 === 0 ? SOURCES.math : SOURCES.contest;
-      const c = await src.fetch(fetchSettings());
-      if (c.answer) return c;
+      if (L.levels && (!L.contest || Math.random() < 0.5)) return await mathProblem({ levels: L.levels });
+      if (L.contest) return await contestBetween(L.contest);
     } catch { /* try again */ }
   }
   return answerableProblem();
@@ -2180,12 +2207,27 @@ function openFilters() {
 }
 
 // ------------------------------------------------------------------ mini-games
-const BEST_LABEL = { blockblast: (v) => `${v} pts`, chess: (v) => `Beat ${['Beginner', 'Casual', 'Club', 'Strong'][v - 1]}`, sumblast: (v) => `${v} pts`, g24: (v) => `${v} solved`, queens: (v) => `${v}×${v}`, rush: (v) => `${v} correct` };
+const BEST_LABEL = { blockblast: (v) => `${v} pts`, chess: (v) => (v > 100 ? `Rating ${v}` : 'Played'), sumblast: (v) => `${v} pts`, g24: (v) => `${v} solved`, queens: (v) => `${v}×${v}`, rush: (v) => `${v} correct` };
 const gameCtx = {
   openSheet: (...a) => openSheet(...a), closeSheet: () => closeSheet(), toast: (m) => toast(m), sound: (k) => sound(k), shareText: (t) => shareText(t),
   bests: () => state.stats.games || {},
-  charges: () => state.stats.charges || 0,
-  spend(n) { if ((state.stats.charges || 0) < n) return false; state.stats.charges -= n; saveStats(); return true; },
+  charges: () => (state.stats.charges ??= 3),
+  spend(n) { if (gameCtx.charges() < n) return false; state.stats.charges -= n; saveStats(); return true; },
+  refund(n) { state.stats.charges = gameCtx.charges() + n; saveStats(); },
+  gameLevelName: () => GAME_LEVELS[state.settings.gameLevel || 'medium'].name,
+  pickGameLevel: (done) => pickGameLevel(done),
+  chessPuzzle: (r) => chessPuzzle(r),
+  puzzleRating: () => (state.stats.puzzleRating ??= 800),
+  puzzleResult(pr, solved) {
+    const r = gameCtx.puzzleRating();
+    const n = (state.stats.puzzles = (state.stats.puzzles || 0) + 1);
+    const k = n < 10 ? 60 : n < 30 ? 36 : 20; // settle in fast, then steady
+    const delta = Math.round(k * ((solved ? 1 : 0) - 1 / (1 + 10 ** ((pr - r) / 400))));
+    state.stats.puzzleRating = Math.max(400, r + delta);
+    if (solved) state.stats.puzzlesSolved = (state.stats.puzzlesSolved || 0) + 1;
+    saveStats();
+    return { rating: state.stats.puzzleRating, delta };
+  },
   // Show a real problem in the given box; resolves true/false once answered.
   async problem(box) {
     const card = await quickProblem();
@@ -2210,6 +2252,26 @@ const gameCtx = {
     checkBadges();
   },
 };
+// ------------------------------------------------------------------ Learn (Duolingo-style courses)
+const learnCtx = {
+  openSheet: (...a) => openSheet(...a), closeSheet: () => closeSheet(), toast: (m) => toast(m), sound: (k) => sound(k), shareText: (t) => shareText(t),
+  subjects: MATH_SUBJECTS,
+  progress: () => (state.stats.learn ||= { course: null, done: {}, lessons: 0 }),
+  save: () => saveStats(),
+  fetchProblem: (config, level) => mathProblem({ config, levels: [level] }),
+  mountProblem(box, card, onAnswered) {
+    const el = buildCard(card, { standalone: true, onAnswered });
+    el.querySelectorAll('.rail, .read-more, .hint-btn').forEach((x) => x.remove());
+    box.innerHTML = ''; box.appendChild(el);
+    return el;
+  },
+  lessonDone(xp, { perfect }) {
+    const p = learnCtx.progress(); p.lessons = (p.lessons || 0) + 1;
+    gainXp(xp); questEvent('lesson'); checkBadges(); saveStats();
+    if (perfect) state.stats.perfectLessons = (state.stats.perfectLessons || 0) + 1;
+  },
+};
+
 // A playable "make 24" card that turns up in the feed now and then.
 function buildGameCard(data) {
   const el = h(`<section class="card s-game" data-id="${escapeHTML(data.id)}"><div class="card-inner">
@@ -2256,6 +2318,7 @@ function openProgress() {
     <div class="league" style="--lc:${leagueFor(st.weekOf === wk ? st.weekXp || 0 : 0)[2]}"><b>${leagueFor(st.weekOf === wk ? st.weekXp || 0 : 0)[0]} league</b><span>${(() => { const w = st.weekOf === wk ? st.weekXp || 0 : 0; const nx = nextLeague(w); return nx ? `${nx[1] - w} XP to ${nx[0]} this week` : 'Top league — amazing!'; })()}</span></div>
     ${st.chests > 0 ? '<button class="btn wide open-chest">🎁 Open a chest</button>' : ''}
     <button class="btn ghost wide duel-go">⚔ Duel a friend</button>
+    <button class="btn ghost wide learn-go">🎓 Learn — courses</button>
     <button class="btn ghost wide games-go">🎮 Mini-games</button>
     <h3>Today’s quests</h3>
     <div class="quests">${quests.map((q) => {
@@ -2317,6 +2380,7 @@ function openProgress() {
   $('.open-chest', body)?.addEventListener('click', () => { closeSheet(); openChest(); });
   $('.duel-go', body).addEventListener('click', () => openDuel());
   $('.games-go', body).addEventListener('click', () => openGames(gameCtx));
+  $('.learn-go', body).addEventListener('click', () => openLearn(learnCtx));
   renderBoard();
   openSheet('Your progress', body, 'tall');
 }
