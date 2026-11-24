@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Numeria</title>
+  <meta name="description" content="A maths MMO: explore, battle with real AMC 8, AMC 10, AMC 12 and AIME problems, and raid with friends.">
+  <meta name="theme-color" content="#0b0c10">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="../icons/icon-180.png">
+  <link rel="stylesheet" href="../vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="rpg.css">
+  <script src="../vendor/katex/katex.min.js" defer></script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <canvas id="world"></canvas>
+  <div id="hud" hidden>
+    <div class="h-card">
+      <span class="h-icon"></span>
+      <div class="h-info">
+        <div class="h-top"><b class="h-name"></b><span class="h-lv"></span><span class="h-gold"></span></div>
+        <div class="hbar hp"><i></i><span></span></div>
+        <div class="hbar mp"><i></i><span></span></div>
+        <div class="hbar xp"><i></i></div>
+      </div>
+    </div>
+    <div id="objective"></div>
+  </div>
+  <div id="raidBar" hidden><i></i><span></span></div>
+  <nav id="side" hidden>
+    <button id="qBtn" aria-label="Quests">📜</button>
+    <button id="bagBtn" aria-label="Bag">🎒</button>
+    <button id="mapBtn" aria-label="Map">🗺️</button>
+    <button id="chatBtn" aria-label="Chat">💬</button>
+    <button id="menuBtn" aria-label="Menu">☰</button>
+  </nav>
+  <div id="online"></div>
+  <div id="chatTicker"></div>
+  <div id="zoneBanner"></div>
+  <div id="toasts"></div>
+  <div id="ui"></div>
+</body>
+</html>

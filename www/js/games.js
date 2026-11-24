@@ -29,6 +29,7 @@ export function openGames(ctx) {
   const tile = (g) => `<button class="gm-tile" data-g="${g.id}"><span class="gm-icon">${g.icon}</span><b>${g.name}</b><small>${best[g.id] != null && best[g.id] > 0 ? `Best ${ctx.bestLabel(g.id, best[g.id])}` : g.cost}</small></button>`;
   const body = el(`<div class="games-hub">
     <div class="gm-top"><span class="g-charge-static">⚡ <b>${ctx.charges()}</b></span><span class="small">Problems for ⚡: <b>${ctx.gameLevelName()}</b> <button class="link g-level">change</button></span></div>
+    <a class="gm-mmo" href="rpg/"><span class="gm-icon">⚔️</span><span><small>NEW · MATHS MMO</small><b>Numeria</b><em>Explore a world, battle with real AMC 8 → AIME problems, raid with friends.</em></span><span class="gm-go">Play ›</span></a>
     <button class="gm-feature" data-g="${gotd.id}"><span class="gm-icon">${gotd.icon}</span><span><small>GAME OF THE DAY · 2× XP</small><b>${gotd.name}</b><em>${gotd.blurb}</em></span></button>
     ${CATS.map(([c, label]) => `<h4 class="gm-cat">${label}</h4><div class="gm-grid">${GAMES.filter((g) => g.cat === c).map(tile).join('')}</div>`).join('')}
     <p class="small">Every problem you get right — in the feed, in Learn, or in a game — earns ⚡. Math Blitz, 24 and Memory Match are free, because they’re maths already.</p></div>`);

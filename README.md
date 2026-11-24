@@ -67,6 +67,18 @@ No API keys, no server, no accounts. Everything is free and public.
 
 ---
 
+
+## ⚔️ Numeria — the MathScroll MMO (`www/rpg/`)
+
+A separate game for ages 12–16 that lives in the same app, at `/rpg/` (open it from **Games → Numeria**).
+
+- **World:** the town of Integer Hamlet plus six zones that climb from **AMC 8** to the **AIME**: Fraction Fields → Prime Woods → Polygon Peaks → Modular Marsh → Combinatoria Canyon → Citadel of AIME. Maps are generated from fixed seeds, so every player sees the same world. Tap to walk (or use WASD/arrows), talk to townsfolk, and use 🔷 waystones to fast travel.
+- **Battles:** regular monsters ask quick AMC-style questions (25 generators, five choices, 30 s, critical hits for fast answers). **Elites, zone bosses and the raid boss use real contest problems**: AMC 8/10/12 and AIME from Easy2Hard-Bench (with difficulty ratings) and AIME 1983–2024, checked by value, with solutions and AoPS Wiki links.
+- **Heroes:** four classes (Algebraist, Geometer, Number Theorist, Combinatorist), each with +25% damage on its topic and a maths hint ability: Estimate, Sketch, Last Digit or Eliminate. Abilities unlock as you level: Focus, Heal, Second Chance, Overdrive.
+- **Progression:** XP and levels up to 30, gold, a shop, gear (weapon/armour/charm), potions, an inn, the main story (recover a Theorem Shard from each zone guardian), side quests, three daily bounties, and a trainer you can spar with.
+- **Multiplayer:** other players appear live in your zone. Chat is **quick chat only** (preset phrases and emotes), so it stays safe for minors. The **Grand Examiner** is an hourly raid boss with shared HP: every correct AIME answer from anyone in the Citadel damages it. Multiplayer runs over Supabase Realtime once `js/config.js` has your Supabase URL and anon key (Realtime broadcast is on by default; no tables needed). Without it, players in other tabs on the same device see each other, and labelled 🤖 NPC adventurers keep zones lively.
+- Saves automatically on the device.
+
 ## Project layout
 
 ```
