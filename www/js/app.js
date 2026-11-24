@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = {
   dailyGoal: 5,
   theme: 'system',
   daily: true,
+  focus: { on: true, every: 4, seconds: 10, gate: true, skips: 3 },
 };
 
 const savedSettings = store.get('settings', {});
@@ -52,6 +53,7 @@ const state = {
 state.settings.sources = { ...DEFAULT_SETTINGS.sources, ...state.settings.sources };
 state.settings.weights = { ...DEFAULT_SETTINGS.weights, ...state.settings.weights };
 state.settings.filters = { ...DEFAULT_FILTERS, ...state.settings.filters };
+state.settings.focus = { ...DEFAULT_SETTINGS.focus, ...state.settings.focus };
 if (state.stats.rating == null) state.stats.rating = 1000;
 const filters = () => state.settings.filters;
 const fetchSettings = () => ({ ...state.settings, rating: state.stats.rating });
@@ -121,6 +123,8 @@ const BADGES = [
   { id: 'seq1', name: 'Pattern spotter', desc: 'Guess the next term of a sequence', test: () => (state.stats.seqRight || 0) >= 1 },
   { id: 'post1', name: 'Author', desc: 'Write a post', test: () => state.posts.length >= 1 },
   { id: 'save10', name: 'Collector', desc: 'Save 10 cards', test: () => state.saved.length >= 10 },
+  { id: 'focus10', name: 'Deep thinker', desc: 'Finish 10 focus problems', test: () => (state.stats.focusDone || 0) >= 10 },
+  { id: 'think30', name: 'Patient mind', desc: 'Spend 30 minutes thinking on problems', test: () => (state.stats.thinkTotal || 0) >= 1800 },
 ];
 function checkBadges() {
   let fresh = null;
@@ -383,6 +387,7 @@ function fill() {
 }
 
 function resetFeed() {
+  endFocus('reset');
   state.generation++;
   state.cards = [];
   state.pending = 0;
@@ -494,7 +499,17 @@ function buildCard(data, { standalone = false, onAnswered = null } = {}) {
     cloud.myLikes([data.cloudId]).then((set) => { if (set.has(data.cloudId)) { const b = $('.like', el); b.classList.add('on'); b.setAttribute('aria-pressed', 'true'); } }).catch(() => {});
   }
   $('.save', el).addEventListener('click', (e) => toggleList('saved', data, e.currentTarget));
-  $('.sol', el)?.addEventListener('click', () => openSolution(data));
+  const srcLink = $('.open', el);
+  if (srcLink && isProblem(data)) {
+    // The source page can give the answer away, so it waits for the think time too.
+    srcLink.classList.add('gated'); srcLink.dataset.frac = '1';
+    srcLink.addEventListener('click', (e) => { if (spoilerLeft(el, 1) > 0) { e.preventDefault(); gated(el, 1, srcLink, () => {})(); } });
+  }
+  const solBtn = $('.sol', el);
+  if (solBtn) {
+    if (isProblem(data)) { solBtn.classList.add('gated'); solBtn.dataset.frac = '1'; }
+    solBtn.addEventListener('click', isProblem(data) ? gated(el, 1, solBtn, () => openSolution(data)) : () => openSolution(data));
+  }
   $('.share', el).addEventListener('click', () => share(data));
   attachDoubleTap(el, data);
 
@@ -518,6 +533,129 @@ function buildCard(data, { standalone = false, onAnswered = null } = {}) {
   setTimeout(checkOverflow, 400);
   el._checkOverflow = checkOverflow;
   return el;
+}
+
+// ------------------------------------------------------------------ focus: staying with a problem
+// 1) Spoilers (hint, answer, solution) unlock after a few seconds of thinking.
+// 2) Every few problems is a "focus problem": the feed pauses on it for ~10 s, or until you answer.
+//    A few "skip anyway" passes a day keep it from feeling like a trap.
+// 3) Flicking past several problems in a row makes the next one a focus problem.
+const focusCfg = () => state.settings.focus;
+const answered = (el) => el.classList.contains('solved') || el.classList.contains('missed');
+function spoilerLeft(el, frac) {
+  const f = focusCfg();
+  if (!f.gate || answered(el)) return 0;
+  const start = el._firstSeen || Date.now();
+  return Math.max(0, Math.ceil((start + f.seconds * 1000 * frac - Date.now()) / 1000));
+}
+function gated(el, frac, btn, fn) {
+  return () => {
+    const left = spoilerLeft(el, frac);
+    if (left > 0) {
+      btn.classList.remove('nudge'); void btn.offsetWidth; btn.classList.add('nudge');
+      toast(`${left}s more — have a go first!`);
+      return;
+    }
+    fn();
+  };
+}
+// Show the countdown on locked spoiler buttons of the card on screen.
+setInterval(() => {
+  if (!currentEl && !sheet.classList.contains('open')) return;
+  const els = [currentEl, sheet.classList.contains('open') ? $('#sheetBody .card') : null].filter(Boolean);
+  for (const el of els) {
+    el.querySelectorAll('.gated').forEach((b) => {
+      const left = spoilerLeft(el, Number(b.dataset.frac || 1));
+      b.classList.toggle('waiting', left > 0);
+      if (left > 0) b.dataset.left = `${left}s`; else delete b.dataset.left;
+    });
+  }
+}, 400);
+
+let focusLock = null;
+const skipsLeft = () => Math.max(0, focusCfg().skips - (dayRec().focusSkips || 0));
+function startFocus(el) {
+  if (focusLock) endFocus('reset');
+  const secs = focusCfg().seconds;
+  const pill = h(`<div class="focus-pill" role="status">
+      <svg viewBox="0 0 36 36" class="ring"><circle cx="18" cy="18" r="15"/><circle class="prog" cx="18" cy="18" r="15"/></svg>
+      <div class="focus-text"><b>Focus problem</b><span>Stay with it for <i>${secs}</i>s — or answer it</span></div>
+      <button class="skip-focus">Skip${skipsLeft() ? ` (${skipsLeft()})` : ''}</button></div>`);
+  el.appendChild(pill);
+  const start = Date.now();
+  focusLock = { el, start, secs, pill, target: el.offsetTop };
+  lockFeed(el);
+  const prog = $('.prog', pill);
+  const tick = () => {
+    if (!focusLock || focusLock.el !== el) return;
+    const t = (Date.now() - start) / 1000;
+    const left = Math.max(0, Math.ceil(secs - t));
+    $('i', pill).textContent = left;
+    prog.style.strokeDashoffset = `${94.25 * (1 - Math.min(1, t / secs))}`;
+    if (t >= secs) endFocus('done'); else focusLock.timer = setTimeout(tick, 200);
+  };
+  tick();
+  $('.skip-focus', pill).addEventListener('click', () => {
+    if (!skipsLeft()) { toast('No skips left today — answer it, or wait it out. You’re close!'); return; }
+    dayRec().focusSkips = (dayRec().focusSkips || 0) + 1; saveStats();
+    endFocus('skip');
+    feed.scrollBy({ top: feed.clientHeight, behavior: 'smooth' });
+  });
+}
+function endFocus(reason) {
+  if (!focusLock) return;
+  const { el, pill, timer } = focusLock;
+  clearTimeout(timer);
+  focusLock = null;
+  unlockFeed();
+  if (reason === 'done' || reason === 'answered') {
+    state.stats.focusDone = (state.stats.focusDone || 0) + 1; saveStats(); checkBadges();
+    pill.classList.add('done');
+    pill.innerHTML = `<div class="focus-text"><b>${reason === 'answered' ? 'Nice focus!' : 'Time’s up — nice focus.'}</b><span>${reason === 'answered' ? 'Swipe on when you’re ready.' : 'Solutions are unlocked. Swipe on when you’re ready.'}</span></div>`;
+    setTimeout(() => pill.remove(), 3500);
+  } else {
+    pill.remove();
+  }
+  if (el) el.classList.remove('focusing');
+}
+function lockFeed(el) {
+  el.classList.add('focusing');
+  const settle = (tries = 0) => {
+    if (!focusLock || focusLock.el !== el) return;
+    focusLock.target = el.offsetTop;
+    if (Math.abs(feed.scrollTop - el.offsetTop) < 3 || tries > 12) { feed.classList.add('locked'); feed.scrollTop = el.offsetTop; return; }
+    setTimeout(() => settle(tries + 1), 80);
+  };
+  settle();
+}
+function unlockFeed() { feed.classList.remove('locked'); }
+// If anything still moves the feed while locked, spring back.
+feed.addEventListener('scroll', () => {
+  if (!focusLock || !feed.classList.contains('locked')) return;
+  if (Math.abs(feed.scrollTop - focusLock.target) > 4) {
+    feed.scrollTop = focusLock.target;
+    const p = focusLock.pill; p.classList.remove('nudge'); void p.offsetWidth; p.classList.add('nudge');
+  }
+}, { passive: true });
+
+let quickRun = 0;
+let forceFocus = false;
+let problemCount = 0;
+// Called when a new card takes the screen.
+function onCardShown(el, data, prevData, prevDwell) {
+  if (prevData && isProblem(prevData)) {
+    const secs = Math.min(300, prevDwell / 1000);
+    const d = dayRec(); d.think = Math.round((d.think || 0) + secs);
+    state.stats.thinkTotal = Math.round((state.stats.thinkTotal || 0) + secs);
+    saveStats();
+    if (secs < 3) quickRun++; else quickRun = 0;
+    if (quickRun >= 3 && focusCfg().on) { quickRun = 0; forceFocus = true; toast('Slow down a little — the next problem is a focus problem.'); }
+  }
+  el._firstSeen ||= Date.now();
+  if (!data || !isProblem(data) || answered(el)) return;
+  problemCount++;
+  const f = focusCfg();
+  if (f.on && (forceFocus || problemCount % f.every === 0)) { forceFocus = false; startFocus(el); }
 }
 
 // ------------------------------------------------------------------ difficulty
@@ -647,12 +785,13 @@ function answerBox(data, cardEl, onAnswered = null) {
   const box = h('<div class="answer"></div>');
   if (data.hintHtml) {
     const hint = h('<button class="btn ghost small hint-btn">Hint</button>');
-    hint.addEventListener('click', () => {
+    hint.classList.add('gated'); hint.dataset.frac = '0.5';
+    hint.addEventListener('click', gated(cardEl, 0.5, hint, () => {
       const shown = h('<div class="hint-box"><b>Hint</b> </div>');
       shown.appendChild(renderContent(data.hintHtml, { base: 'text', dollar: true }));
       hint.replaceWith(shown);
       requestAnimationFrame(() => cardEl._checkOverflow?.());
-    });
+    }));
     box.appendChild(hint);
   }
   if (!data.answer) {
@@ -660,17 +799,19 @@ function answerBox(data, cardEl, onAnswered = null) {
     return box;
   }
   if (data.answer.type === 'reveal') {
-    const btn = h('<button class="btn ghost reveal">Show answer</button>');
-    btn.addEventListener('click', () => {
+    const btn = h('<button class="btn ghost reveal gated" data-frac="1">Show answer</button>');
+    btn.addEventListener('click', gated(cardEl, 1, btn, () => {
       const ans = h('<div class="feedback revealed">Answer: </div>');
       ans.appendChild(renderContent(`<span>$${escapeHTML(data.answer.value)}$</span>`, { base: 'text', dollar: true }));
       btn.replaceWith(ans);
       requestAnimationFrame(() => cardEl._checkOverflow?.());
-    });
+      if (focusLock?.el === cardEl) endFocus('answered');
+    }));
     box.appendChild(btn);
     return box;
   }
   const finish = (ok) => {
+    if (focusLock?.el === cardEl) setTimeout(() => endFocus('answered'), 0);
     updateRating(data, ok);
     state.stats.answered++;
     const d = dayRec();
@@ -835,12 +976,15 @@ const observer = new IntersectionObserver((entries) => {
     if (e.isIntersecting && e.intersectionRatio > 0.6 && e.target !== currentEl) {
       // A very quick swipe past a card counts as "not for me".
       const prev = state.cards.find((x) => x.el === currentEl);
-      if (prev && Date.now() - currentSince < 1200) engage(prev.data.source, -0.3);
+      const dwell = Date.now() - currentSince;
+      if (prev && dwell < 1200) engage(prev.data.source, -0.3);
+      if (focusLock && focusLock.el !== e.target) endFocus('reset');
       currentEl = e.target;
       currentSince = Date.now();
       e.target._checkOverflow?.();
       const c = state.cards.find((x) => x.el === e.target);
       if (c) markSeen(c.data.id);
+      onCardShown(e.target, c?.data, prev?.data, dwell);
       fill();
     }
   }
@@ -856,6 +1000,7 @@ function currentIndex() {
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('input, textarea')) return;
   if (!$('#sheet').hidden) { if (e.key === 'Escape') closeSheet(); return; }
+  if (focusLock && ['ArrowDown', 'j', ' ', 'PageDown', 'ArrowUp', 'k', 'PageUp'].includes(e.key)) { e.preventDefault(); toast('Focus problem — stay with it a few more seconds'); return; }
   if (['ArrowDown', 'j', ' ', 'PageDown'].includes(e.key)) { e.preventDefault(); feed.scrollBy({ top: feed.clientHeight, behavior: 'smooth' }); }
   if (['ArrowUp', 'k', 'PageUp'].includes(e.key)) { e.preventDefault(); feed.scrollBy({ top: -feed.clientHeight, behavior: 'smooth' }); }
   if (e.key === 's' && currentEl) $('.sol', currentEl)?.click();
@@ -912,6 +1057,7 @@ function openSolution(data) {
 
 function openCard(data, title) {
   const card = buildCard(data, { standalone: true });
+  card._firstSeen = Date.now();
   openSheet(title || data.heading, card, 'tall');
   card._checkOverflow?.();
   markSeen(data.id);
@@ -1215,7 +1361,7 @@ function openProfile() {
     week.push(`<div class="day ${cls}" title="${rec.solved || 0} solved"><span></span><small>${d.toLocaleDateString('en', { weekday: 'narrow' })}</small></div>`);
   }
   body.appendChild(h(`<div class="goal-card">
-      <div class="goal-top"><b>Today</b><span>${t.solved} / ${goal} solved</span></div>
+      <div class="goal-top"><b>Today</b><span>${t.solved} / ${goal} solved · ${Math.round((t.think || 0) / 60)} min thinking</span></div>
       <div class="bar"><span style="width:${pct}%"></span></div>
       <div class="week">${week.join('')}</div>
     </div>`));
@@ -1688,6 +1834,21 @@ function openSettings() {
   const goalRow = h(`<label class="row"><span><b>Daily goal</b><small>Problems to solve each day</small></span><select class="select">${[3, 5, 10, 15, 20].map((n) => `<option ${n === st.dailyGoal ? 'selected' : ''}>${n}</option>`).join('')}</select></label>`);
   goalRow.querySelector('select').addEventListener('change', (e) => { st.dailyGoal = Number(e.target.value); saveSettings(); });
   feedGroup.appendChild(goalRow);
+  const f = st.focus;
+  const sel = (vals, cur, fmt) => vals.map((v) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${fmt(v)}</option>`).join('');
+  const focusRows = h(`<div>
+    <label class="row"><span><b>Focus problems</b><small>Every few problems, the feed pauses so you really try one</small></span><input type="checkbox" class="switch f-on" ${f.on ? 'checked' : ''}></label>
+    <label class="row"><span><b>How often</b></span><select class="select f-every">${sel([3, 4, 5, 8, 10], f.every, (v) => `Every ${v}th`)}</select></label>
+    <label class="row"><span><b>Think time</b><small>How long focus problems pause, and spoilers stay hidden</small></span><select class="select f-secs">${sel([10, 15, 20, 30, 45], f.seconds, (v) => `${v} s`)}</select></label>
+    <label class="row"><span><b>Hide spoilers at first</b><small>Hint, answer and solution unlock after the think time</small></span><input type="checkbox" class="switch f-gate" ${f.gate ? 'checked' : ''}></label>
+    <label class="row"><span><b>Skips per day</b><small>For focus problems you really want to pass</small></span><select class="select f-skips">${sel([0, 1, 3, 5, 10], f.skips, (v) => String(v))}</select></label>
+  </div>`);
+  $('.f-on', focusRows).addEventListener('change', (e) => { f.on = e.target.checked; saveSettings(); if (!f.on) endFocus('reset'); });
+  $('.f-gate', focusRows).addEventListener('change', (e) => { f.gate = e.target.checked; saveSettings(); });
+  $('.f-every', focusRows).addEventListener('change', (e) => { f.every = Number(e.target.value); saveSettings(); });
+  $('.f-secs', focusRows).addEventListener('change', (e) => { f.seconds = Number(e.target.value); saveSettings(); });
+  $('.f-skips', focusRows).addEventListener('change', (e) => { f.skips = Number(e.target.value); saveSettings(); });
+  while (focusRows.firstElementChild) feedGroup.appendChild(focusRows.firstElementChild);
   body.appendChild(feedGroup);
 
   body.appendChild(h('<h3>Appearance</h3>'));
@@ -1742,7 +1903,7 @@ function openWelcome() {
   const topicChips = PROBLEM_TOPICS.map((t) => `<button class="chip on" data-topic="${t}">${t}</button>`).join('');
   body.innerHTML = `
     <div class="welcome-hero"><div class="brand big">∑</div><h2>Scroll maths, not videos.</h2>
-      <p>Swipe up for the next card. Tap A–E to answer, double-tap to like, and tap <b>Solution</b> when you're stuck.</p></div>
+      <p>Swipe up for the next card. Tap A–E to answer and double-tap to like. Every few problems is a <b>focus problem</b>: the feed pauses for a few seconds so you can really have a go. Solutions unlock once you've thought about it.</p></div>
     <h3>What do you want to see?</h3><div class="chips">${srcChips}</div>
     <h3>Favourite topics</h3><div class="chips">${topicChips}</div>
     <button class="btn wide start">Start scrolling</button>`;

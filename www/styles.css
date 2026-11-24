@@ -506,3 +506,24 @@ textarea.field { font-family: var(--serif); font-size: 17px; line-height: 1.45; 
 .auth .resend { margin-bottom: 8px; }
 .account span { display: flex; flex-direction: column; gap: 2px; }
 .sync-note { font-size: 12px; color: var(--faint); }
+
+/* focus problems */
+.feed.locked { overflow-y: hidden; }
+.focus-pill { position: absolute; left: 16px; right: 80px; bottom: calc(var(--bottom) + 16px); z-index: 4; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 16px; background: color-mix(in srgb, var(--card-2) 94%, transparent); border: 1px solid color-mix(in srgb, #f5b942 55%, transparent); backdrop-filter: blur(10px); box-shadow: 0 8px 30px rgba(0,0,0,.25); font-family: var(--sans); animation: rise .35s both; }
+.focus-pill .ring { width: 36px; height: 36px; flex: none; transform: rotate(-90deg); }
+.focus-pill .ring circle { fill: none; stroke: var(--line); stroke-width: 3.5; }
+.focus-pill .ring .prog { stroke: #f5b942; stroke-dasharray: 94.25; stroke-dashoffset: 94.25; stroke-linecap: round; transition: stroke-dashoffset .2s linear; }
+.focus-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.focus-text b { font-size: 14px; color: #f5b942; }
+.focus-text span { font-size: 12.5px; color: var(--muted); }
+.focus-text i { font-style: normal; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.skip-focus { flex: none; font-size: 12.5px; font-weight: 600; color: var(--muted); padding: 6px 8px; border-radius: 8px; }
+.skip-focus:active { background: var(--line); }
+.focus-pill.done { border-color: color-mix(in srgb, var(--ok) 60%, transparent); }
+.focus-pill.done b { color: var(--ok); }
+.focus-pill.nudge, .gated.nudge { animation: shake .35s; }
+.card.focusing .read-more { display: none; }
+/* locked spoilers show their countdown */
+.gated.waiting { position: relative; opacity: .65; }
+.gated.waiting::after { content: attr(data-left); position: absolute; top: -6px; right: -6px; font: 700 11px var(--sans); color: #17130a; background: #f5b942; border-radius: 999px; padding: 2px 6px; }
+.rail-btn.gated.waiting::after { top: -4px; right: 0; }

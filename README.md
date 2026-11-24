@@ -24,6 +24,7 @@ Why the mirrors? AoPS puts every automated request through a bot check, and Proo
 - Swipe one card at a time, TikTok-style. Double-tap or tap the heart to like.
 - Tap A–E or type an answer and it's checked instantly; streak counter for answers in a row.
 - **Hints** (the first step of the solution) and full solutions/proofs that slide up.
+- **Focus problems**: every few problems the feed pauses for 10 seconds (or until you answer) so you really try it, with a few skips a day. Hints, answers, solutions and source links unlock after the think time, and flicking past several problems in a row triggers a focus problem. Think time is tracked in your profile. All adjustable in Settings.
 - **Daily challenge**: the same AMC/AIME problem for everyone each day, with a daily streak and a share-your-result button.
 - **Sprint**: 10 answerable AMC/AIME problems against the clock, with a personal best.
 - **Guess the next term** on every OEIS sequence.
