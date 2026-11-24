@@ -1,3 +1,4 @@
+import { LECTURES } from './lectures.js';
 // Learn: Duolingo-style courses. A course is a winding path of units; each unit has four lessons, a
 // treasure chest and a unit test, a guidebook of key ideas, and a legendary (no-mistakes) challenge.
 // Foundations courses use the MATH dataset (levels 1–5); Olympiad courses use Omni-MATH difficulty bands.
@@ -241,7 +242,8 @@ function nodePopup(ctx, course, k, st, wrap) {
 }
 
 function guidebook(ctx, course, u) {
-  const tips = (GUIDE[course.id] || [])[u] || [];
+  const lec = (LECTURES[course.id] || [])[u];
+  const tips = lec ? lec.ideas.map((x) => `**${x.t}.** ${x.b}`) : (GUIDE[course.id] || [])[u] || [];
   const body = el(`<div class="guidebook" style="--cc:${course.color}"><p class="small">Unit ${u + 1} · ${unitSub(course, u)}</p><h3>${unitName(course, u)}</h3><div class="gb-tips"></div>
     <button class="btn wide back">Back to the path</button></div>`);
   const box = body.querySelector('.gb-tips');
@@ -386,80 +388,114 @@ function startLesson(ctx, course, info, { practice = false, node = null, jump = 
 function startLecture(ctx, course, u) {
   ctx.closeSheet();
   const p = ctx.progress();
-  const tips = (GUIDE[course.id] || [])[u] || [];
+  const lec = (LECTURES[course.id] || [])[u];
   const spec = problemSpec(course, u);
+  let checkedRight = null;
   const ov = el(`<div class="story" style="--cc:${course.color}"><div class="story-bars"></div><button class="story-x" aria-label="Close">✕</button><div class="story-slide"></div>
     <div class="story-nav"><button class="btn ghost st-prev">‹ Back</button><button class="btn st-next">Next ›</button></div></div>`);
   document.body.appendChild(ov);
   const slideEl = ov.querySelector('.story-slide');
-  // Slides are functions that fill the slide element (some load things).
+  const R = (t) => ctx.renderText(t);
   const slides = [
-    (box) => { box.innerHTML = `<div class="st-cover"><div class="st-icon">${course.icon}</div><small>${courseName(ctx, course)} · Unit ${u + 1}</small><h2>${unitName(course, u)}</h2><p>${unitSub(course, u)}</p><div class="st-learn"><b>In this lecture</b><ul>${['Key ideas', 'Concept spotlight', 'A worked example, step by step', 'Your turn'].map((x) => `<li>${x}</li>`).join('')}</ul></div><p class="small">Tap Next, or the right side of the screen.</p></div>`; },
-    ...tips.map((t, k) => (box) => { box.innerHTML = `<div class="st-idea"><small>Key idea ${k + 1} of ${tips.length}</small><div class="st-big"></div></div>`; box.querySelector('.st-big').appendChild(ctx.renderText(t)); }),
+    (box) => {
+      box.innerHTML = `<div class="st-cover"><div class="st-icon">${course.icon}</div><small>${courseName(ctx, course)} · Unit ${u + 1} · ${unitSub(course, u)}</small><h2>${unitName(course, u)}</h2><div class="st-hook"></div>
+        <div class="st-learn"><b>In this lecture</b><ol>${lec.ideas.map((x) => `<li>${escapeText(x.t)}</li>`).join('')}<li>A worked example, step by step</li><li>A quick check, then a real problem</li></ol></div><p class="small">Tap Next, or the right side of the screen.</p></div>`;
+      box.querySelector('.st-hook').appendChild(R(lec.hook));
+    },
+    ...lec.ideas.map((idea, k) => (box) => {
+      box.innerHTML = `<div class="st-idea"><small>Idea ${k + 1} of ${lec.ideas.length}</small><h3 class="st-title">${escapeText(idea.t)}</h3><div class="st-body"></div></div>`;
+      box.querySelector('.st-body').appendChild(R(idea.b));
+    }),
+    (box) => {
+      const ex = lec.example; let k = 0;
+      box.innerHTML = '<div class="st-ex"><small>Worked example</small><div class="st-prob"></div><div class="st-steps"></div><div class="st-ans" hidden><b>Answer</b> <span></span></div><button class="btn wide st-step">Show step 1</button></div>';
+      box.querySelector('.st-prob').appendChild(R(ex.q));
+      const btn = box.querySelector('.st-step');
+      btn.addEventListener('click', () => {
+        if (k < ex.steps.length) {
+          const step = el(`<div class="st-stepbox"><b>Step ${k + 1}</b></div>`); step.appendChild(R(ex.steps[k])); box.querySelector('.st-steps').appendChild(step);
+          k++; ctx.sound('quest');
+          btn.textContent = k < ex.steps.length ? `Show step ${k + 1}` : 'Reveal the answer';
+          step.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+          const a = box.querySelector('.st-ans'); a.hidden = false; a.querySelector('span').appendChild(R(ex.ans));
+          btn.remove(); ctx.sound('correct'); a.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      });
+    },
+    (box) => {
+      const ch = lec.check;
+      const order = [...ch.choices.keys()].sort(() => Math.random() - 0.5);
+      box.innerHTML = '<div class="st-ex"><small>Quick check</small><div class="st-prob"></div><div class="st-choices"></div><div class="st-why" hidden></div></div>';
+      box.querySelector('.st-prob').appendChild(R(ch.q));
+      const list = box.querySelector('.st-choices');
+      order.forEach((i) => { const b = el(`<button class="st-choice" data-i="${i}"></button>`); b.appendChild(R(ch.choices[i])); list.appendChild(b); });
+      list.addEventListener('click', (e) => {
+        const b = e.target.closest('.st-choice'); if (!b || list.dataset.done) return;
+        list.dataset.done = '1';
+        const ok = +b.dataset.i === ch.a;
+        if (checkedRight === null) checkedRight = ok;
+        b.classList.add(ok ? 'right' : 'wrong');
+        list.querySelector(`[data-i="${ch.a}"]`).classList.add('right');
+        const why = box.querySelector('.st-why'); why.hidden = false; why.className = `st-why ${ok ? 'ok' : 'no'}`;
+        why.innerHTML = `<b>${ok ? 'Correct!' : 'Not quite.'}</b> `; why.appendChild(R(ch.why));
+        ctx.sound(ok ? 'correct' : 'wrong');
+      });
+    },
     async (box) => {
-      box.innerHTML = '<div class="st-idea"><small>Concept spotlight</small><p class="loader-msg">Loading…</p></div>';
+      box.innerHTML = '<div class="st-idea"><small>Go deeper</small><p class="loader-msg">Loading…</p></div>';
       const title = (WIKI[course.id] || [])[u];
       try {
         const w = await ctx.wikiSummary(title);
         if (!box.isConnected) return;
-        box.innerHTML = `<div class="st-wiki"><small>Concept spotlight · Wikipedia</small><h3>${escapeText(w.title || title.replace(/_/g, ' '))}</h3>${w.thumbnail ? `<img src="${w.thumbnail}" alt="" referrerpolicy="no-referrer">` : ''}<p>${escapeText(w.extract || '')}</p><a href="https://en.wikipedia.org/wiki/${encodeURIComponent(title)}" target="_blank" rel="noopener" class="link">Read the full article</a></div>`;
-      } catch { box.innerHTML = `<div class="st-idea"><small>Concept spotlight</small><h3>${title.replace(/_/g, ' ')}</h3><p>Couldn’t load the article — check your connection.</p></div>`; }
+        box.innerHTML = `<div class="st-wiki"><small>Go deeper · Wikipedia</small><h3>${escapeText(w.title || title.replace(/_/g, ' '))}</h3>${w.thumbnail ? `<img src="${w.thumbnail}" alt="" referrerpolicy="no-referrer">` : ''}<p>${escapeText(w.extract || '')}</p><a href="https://en.wikipedia.org/wiki/${encodeURIComponent(title)}" target="_blank" rel="noopener" class="link">Read the full article</a></div>`;
+      } catch { box.innerHTML = `<div class="st-idea"><small>Go deeper</small><h3>${escapeText(title.replace(/_/g, ' '))}</h3><p>Couldn’t load the article — check your connection.</p></div>`; }
     },
     async (box) => {
-      box.innerHTML = '<div class="st-ex"><small>Worked example</small><p class="loader-msg">Finding a good example…</p></div>';
-      let card = null;
-      for (let t = 0; t < 4 && !card; t++) { try { const c = await ctx.fetchProblem(spec, new Set()); if (c.solutionHtml) card = c; } catch { /* again */ } }
-      if (!box.isConnected) return;
-      if (!card) { box.innerHTML = '<div class="st-ex"><small>Worked example</small><p>Couldn’t load an example right now.</p></div>'; return; }
-      box.innerHTML = '<div class="st-ex"><small>Worked example</small><div class="st-prob"></div><div class="st-steps"></div><button class="btn wide st-step">Show the first step</button></div>';
-      box.querySelector('.st-prob').appendChild(ctx.renderHtml(card));
-      const sol = ctx.renderHtml({ ...card, html: card.solutionHtml });
-      let parts = [...sol.querySelectorAll(':scope > .tt > *, :scope > p, :scope > div > p')];
-      if (parts.length < 2) parts = [sol];
-      let k = 0;
-      const btn = box.querySelector('.st-step');
-      btn.addEventListener('click', () => {
-        const step = el(`<div class="st-stepbox"><b>Step ${k + 1}</b></div>`); step.appendChild(parts[k]); box.querySelector('.st-steps').appendChild(step);
-        k++; ctx.sound('quest');
-        if (k >= parts.length) { btn.textContent = card.answer ? 'Done — that’s the answer!' : 'Done'; btn.disabled = true; } else btn.textContent = `Show step ${k + 1} of ${parts.length}`;
-        step.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      });
-    },
-    async (box) => {
-      box.innerHTML = '<div class="st-ex"><small>Your turn</small><p class="loader-msg">Loading a problem…</p></div>';
+      box.innerHTML = '<div class="st-ex"><small>Your turn · a real competition problem</small><p class="loader-msg">Loading a problem…</p></div>';
       let card = null;
       for (let t = 0; t < 4 && !card; t++) { try { card = await ctx.fetchProblem(spec, new Set()); } catch { /* again */ } }
       if (!box.isConnected) return;
-      if (!card) { box.innerHTML = '<div class="st-ex"><small>Your turn</small><p>Couldn’t load a problem right now.</p></div>'; return; }
-      box.innerHTML = '<div class="st-ex"><small>Your turn — try one</small><div class="st-try"></div></div>';
+      if (!card) { box.innerHTML = '<div class="st-ex"><small>Your turn</small><p>Couldn’t load a problem right now — you can skip this one.</p></div>'; return; }
+      box.innerHTML = '<div class="st-ex"><small>Your turn · a real competition problem</small><div class="st-try"></div></div>';
       ctx.mountProblem(box.querySelector('.st-try'), { ...card, daily: false }, () => {});
     },
     (box) => {
+      box.innerHTML = `<div class="st-idea"><small>Recap · tap a card to flip it</small><div class="st-cards">${lec.ideas.map((x, k) => `<button class="st-card" data-k="${k}"><span class="st-front">${escapeText(x.t)}</span><span class="st-back"></span></button>`).join('')}</div></div>`;
+      box.querySelectorAll('.st-card').forEach((c) => { c.querySelector('.st-back').appendChild(R(lec.ideas[+c.dataset.k].b)); c.addEventListener('click', () => { c.classList.toggle('flip'); ctx.sound('quest'); }); });
+    },
+    (box) => {
       const first = !(p.lectures?.[course.id] || []).includes(u);
-      if (first) { p.lectures ||= {}; (p.lectures[course.id] ||= []).push(u); ctx.save(); ctx.lectureDone(15); }
-      box.innerHTML = `<div class="st-cover"><div class="st-icon">🎓</div><h2>Lecture complete</h2>${first ? '<p class="le-unlock">+15 XP</p>' : ''}<p>Now put it to work in the lessons.</p><button class="btn wide st-go">Back to the path</button></div>`;
+      const xp = 15 + (checkedRight ? 5 : 0);
+      if (first) { p.lectures ||= {}; (p.lectures[course.id] ||= []).push(u); ctx.save(); ctx.lectureDone(xp); }
+      box.innerHTML = `<div class="st-cover"><div class="st-icon">🎓</div><h2>Lecture complete</h2>${first ? `<p class="le-unlock">+${xp} XP${checkedRight ? ' (incl. +5 for the quick check)' : ''}</p>` : ''}<p>Now put it to work in the lessons. The 📖 guidebook keeps these notes.</p><button class="btn wide st-go">Back to the path</button></div>`;
       box.querySelector('.st-go').addEventListener('click', close);
     },
   ];
   let k = 0;
   ov.querySelector('.story-bars').innerHTML = slides.map(() => '<i></i>').join('');
-  const show = () => {
+  const show = (dir = 1) => {
     ov.querySelectorAll('.story-bars i').forEach((b, j) => b.classList.toggle('on', j <= k));
     slideEl.innerHTML = ''; slideEl.scrollTop = 0;
     const box = el('<div class="st-inner"></div>'); slideEl.appendChild(box);
     slides[k](box);
+    box.animate([{ opacity: 0, transform: `translateX(${24 * dir}px)` }, { opacity: 1, transform: 'none' }], { duration: 220, easing: 'ease-out' });
     ov.querySelector('.st-prev').style.visibility = k ? 'visible' : 'hidden';
     ov.querySelector('.st-next').style.visibility = k < slides.length - 1 ? 'visible' : 'hidden';
   };
-  const go = (d) => { const n = Math.max(0, Math.min(slides.length - 1, k + d)); if (n !== k) { k = n; show(); } };
+  const go = (d) => { const n = Math.max(0, Math.min(slides.length - 1, k + d)); if (n !== k) { k = n; show(d); } };
   function close() { ov.remove(); openLearn(ctx); }
   ov.querySelector('.st-next').addEventListener('click', () => go(1));
   ov.querySelector('.st-prev').addEventListener('click', () => go(-1));
   ov.querySelector('.story-x').addEventListener('click', close);
   slideEl.addEventListener('click', (e) => {
-    if (e.target.closest('button, a, input, form, .card, .st-try, .st-steps, img')) return;
+    if (e.target.closest('button, a, input, form, .card, .st-try, .st-steps, .st-ans, .st-why, img')) return;
     go(e.clientX < window.innerWidth / 3 ? -1 : 1);
   });
+  // Swipe left/right between slides too.
+  let sx = null;
+  slideEl.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; }, { passive: true });
+  slideEl.addEventListener('touchend', (e) => { if (sx == null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (Math.abs(dx) > 60) go(dx < 0 ? 1 : -1); });
   show();
 }
 const escapeText = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

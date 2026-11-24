@@ -5,14 +5,14 @@ const el = (html) => { const t = document.createElement('template'); t.innerHTML
 const rnd = (n) => Math.floor(Math.random() * n);
 import { legal as chessLegal, make as chessMake, inCheck as chessInCheck, san as chessSan, fromFEN, moveFromUci, uciOf } from './chess.js';
 
-import { GAMES2, PAID2, play2 } from './games2.js';
+import { GAMES2, PAID2, play2, burst, popText, confetti } from './games2.js';
 const BASE_GAMES = [
-  { id: 'blockblast', name: 'Block Blast', icon: '🧱', blurb: 'Drop blocks, clear rows and columns.', cost: '1⚡ per 3 pieces', cat: 'arcade' },
-  { id: 'chess', name: 'Chess Puzzles', icon: '♞', blurb: 'Find the winning move. Puzzles get harder as your rating rises.', cost: '1⚡ per puzzle', cat: 'classic' },
-  { id: 'sumblast', name: 'Sum Blast', icon: '💥', blurb: 'Drag through tiles that add up to the target. 90 seconds.', cost: '1⚡ per game', cat: 'arcade' },
-  { id: 'g24', name: '24', icon: '🎯', blurb: 'Use all four numbers with + − × ÷ to make 24.', cost: 'Free — it’s maths', cat: 'classic' },
-  { id: 'queens', name: 'Queens', icon: '♛', blurb: 'Place N queens so no two attack each other.', cost: '1⚡ per board', cat: 'classic' },
-  { id: 'rush', name: 'Mental Math Rush', icon: '⚡', blurb: 'As many sums as you can in 60 seconds.', cost: 'Free — it’s maths', cat: 'speed' },
+  { id: 'blockblast', name: 'Block Blast', icon: '🧱', blurb: 'Drop blocks, clear rows and columns, chain combos.', cost: '1⚡ per 3 pieces', cat: 'puzzle',
+    how: ['Drag a piece onto the board.', 'Fill a whole row or column to clear it — several at once score big.', 'Every 3 pieces cost 1 ⚡. Stuck? Solve a problem for a second chance.'] },
+  { id: 'g24', name: '24', icon: '🎯', blurb: 'Use all four numbers with + − × ÷ to make 24.', cost: 'Free — it’s maths', cat: 'brain',
+    how: ['Tap a number, an operation, then another number to combine them.', 'Use all four numbers to make exactly 24.', 'Solve as many as you can in 2 minutes.'] },
+  { id: 'chess', name: 'Chess Puzzles', icon: '♞', blurb: 'Find the winning move. Puzzles match your rating.', cost: '1⚡ per puzzle', cat: 'strategy',
+    how: ['Your opponent moves first — then find the best reply.', 'Tap a piece, then a square.', 'Solve puzzles to raise your rating; harder ones follow.'] },
 ];
 export const GAMES = [...BASE_GAMES, ...GAMES2];
 // The featured game changes every day and pays double XP.
@@ -20,7 +20,7 @@ export function gameOfDay(date = new Date()) {
   const d = Math.floor((date.getTime() - date.getTimezoneOffset() * 60000) / 86400000);
   return GAMES[(d * 7 + 3) % GAMES.length].id;
 }
-const CATS = [['puzzle', '🧠 Puzzles'], ['arcade', '🕹️ Arcade'], ['classic', '♟️ Classics'], ['speed', '⚡ Speed maths · free']];
+const CATS = [['action', '🔥 Action'], ['puzzle', '🧩 Puzzle'], ['brain', '🧠 Brain teasers'], ['strategy', '♟️ Strategy']];
 
 // ------------------------------------------------------------------ hub
 export function openGames(ctx) {
@@ -31,117 +31,28 @@ export function openGames(ctx) {
     <div class="gm-top"><span class="g-charge-static">⚡ <b>${ctx.charges()}</b></span><span class="small">Problems for ⚡: <b>${ctx.gameLevelName()}</b> <button class="link g-level">change</button></span></div>
     <button class="gm-feature" data-g="${gotd.id}"><span class="gm-icon">${gotd.icon}</span><span><small>GAME OF THE DAY · 2× XP</small><b>${gotd.name}</b><em>${gotd.blurb}</em></span></button>
     ${CATS.map(([c, label]) => `<h4 class="gm-cat">${label}</h4><div class="gm-grid">${GAMES.filter((g) => g.cat === c).map(tile).join('')}</div>`).join('')}
-    <p class="small">Every problem you get right — in the feed, in Learn, or in a game — earns ⚡. Speed-maths games are free because they’re maths already.</p></div>`);
+    <p class="small">Every problem you get right — in the feed, in Learn, or in a game — earns ⚡. Math Blitz, 24 and Memory Match are free, because they’re maths already.</p></div>`);
   body.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => startGame(b.dataset.g, ctx)));
   body.querySelector('.g-level').addEventListener('click', () => ctx.pickGameLevel(() => openGames(ctx)));
   ctx.openSheet('Games', body, 'tall');
 }
-const ENTRY = { sumblast: 'play Sum Blast', queens: 'play Queens' };
+// The first time you open a game, show how to play.
+function howTo(ctx, g) {
+  return new Promise((resolve) => {
+    const body = el(`<div class="howto"><div class="ht-icon">${g.icon}</div><h3>${g.name}</h3><ol>${g.how.map((x) => `<li>${x}</li>`).join('')}</ol><p class="small">${g.cost}</p><button class="btn wide ht-go">Let’s play</button></div>`);
+    body.querySelector('.ht-go').addEventListener('click', () => { try { localStorage.setItem(`ms:howto:${g.id}`, '1'); } catch { /* private mode */ } resolve(true); });
+    ctx.openSheet('How to play', body, 'tall', Object.assign(() => resolve(false), { onReplace: false }));
+  });
+}
+const seenHow = (id) => { try { return !!localStorage.getItem(`ms:howto:${id}`); } catch { return true; } };
 export async function startGame(id, ctx, ...args) {
+  const meta = GAMES.find((x) => x.id === id);
+  if (meta?.how && !seenHow(id) && !(await howTo(ctx, meta))) return;
   if (GAMES2.some((g) => g.id === id)) {
     if (PAID2.has(id) && !(await payOrSolve(ctx, `play ${GAMES2.find((g) => g.id === id).name}`))) return;
     return play2(id, { ...ctx, startGame: (gid) => startGame(gid, ctx), openGames: () => openGames(ctx) });
   }
-  if (ENTRY[id] && !(await payOrSolve(ctx, ENTRY[id]))) return;
-  ({ blockblast: blockBlast, chess, sumblast: sumBlast, g24: game24, queens, rush })[id](ctx, ...args);
-}
-
-// ------------------------------------------------------------------ Sum Blast
-function sumBlast(ctx) {
-  const COLS = 6; const ROWS = 7; const TIME = 90;
-  const roll = () => [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 8, 9][rnd(15)];
-  let grid = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, roll));
-  let target = 0; let score = 0; let combo = 0; let left = TIME; let over = false;
-  const body = el(`<div class="sumblast">
-    <div class="gb-top"><span class="gb-score">0</span><span class="gb-target">Make <b></b></span><span class="gb-time">${TIME}s</span></div>
-    <div class="sb-sum"><span>Drag across touching tiles</span></div>
-    <div class="sb-grid" style="--cols:${COLS}"></div>
-    <div class="gb-actions"><button class="btn ghost small shuffle">Shuffle (−5s)</button></div></div>`);
-  const gridEl = body.querySelector('.sb-grid');
-  const newTarget = () => { target = 10 + rnd(11); body.querySelector('.gb-target b').textContent = target; };
-  const draw = () => {
-    gridEl.innerHTML = '';
-    grid.forEach((row, r) => row.forEach((v, c) => {
-      gridEl.appendChild(el(`<div class="sb-tile v${v}" data-r="${r}" data-c="${c}">${v}</div>`));
-    }));
-  };
-  newTarget(); draw();
-  let chain = [];
-  const tileAt = (x, y) => { const t = document.elementFromPoint(x, y); return t && t.classList.contains('sb-tile') && gridEl.contains(t) ? t : null; };
-  const sumOf = () => chain.reduce((s, t) => s + grid[t.r][t.c], 0);
-  const showSum = () => {
-    const s = sumOf();
-    const box = body.querySelector('.sb-sum');
-    box.innerHTML = chain.length ? `<span>${chain.map((t) => grid[t.r][t.c]).join(' + ')} = <b class="${s === target ? 'hit' : s > target ? 'over' : ''}">${s}</b></span>` : '<span>Drag across touching tiles</span>';
-    gridEl.querySelectorAll('.sb-tile').forEach((t) => t.classList.toggle('sel', chain.some((x) => x.r === +t.dataset.r && x.c === +t.dataset.c)));
-  };
-  const add = (t) => {
-    const r = +t.dataset.r; const c = +t.dataset.c;
-    const i = chain.findIndex((x) => x.r === r && x.c === c);
-    if (i >= 0) { if (i === chain.length - 2) chain.pop(); return; } // step back to undo
-    const last = chain[chain.length - 1];
-    if (last && (Math.abs(last.r - r) > 1 || Math.abs(last.c - c) > 1)) return; // must touch (diagonals ok)
-    chain.push({ r, c });
-  };
-  gridEl.addEventListener('pointerdown', (e) => {
-    if (over) return;
-    const t = tileAt(e.clientX, e.clientY); if (!t) return;
-    gridEl.setPointerCapture?.(e.pointerId);
-    chain = []; add(t); showSum();
-  });
-  gridEl.addEventListener('pointermove', (e) => {
-    if (!chain.length || over) return;
-    const t = tileAt(e.clientX, e.clientY); if (t) { add(t); showSum(); }
-  });
-  const release = () => {
-    if (!chain.length || over) return;
-    const s = sumOf();
-    if (s === target && chain.length >= 2) {
-      combo++;
-      const pts = chain.length * chain.length * 10 * Math.min(combo, 5);
-      score += pts;
-      body.querySelector('.gb-score').textContent = score;
-      ctx.sound(chain.length >= 4 ? 'crit' : 'correct');
-      // Burst, then let the tiles above fall and refill from the top.
-      chain.forEach((t) => gridEl.querySelector(`[data-r="${t.r}"][data-c="${t.c}"]`)?.classList.add('pop'));
-      const pop = el(`<div class="sb-pop">+${pts}${combo > 1 ? ` · combo ×${Math.min(combo, 5)}` : ''}</div>`); body.appendChild(pop); setTimeout(() => pop.remove(), 900);
-      const cleared = new Set(chain.map((t) => `${t.r},${t.c}`));
-      setTimeout(() => {
-        for (let c = 0; c < COLS; c++) {
-          const keep = [];
-          for (let r = ROWS - 1; r >= 0; r--) if (!cleared.has(`${r},${c}`)) keep.push(grid[r][c]);
-          for (let r = ROWS - 1, k = 0; r >= 0; r--, k++) grid[r][c] = k < keep.length ? keep[k] : roll();
-        }
-        draw(); gridEl.querySelectorAll('.sb-tile').forEach((t) => t.classList.add('drop'));
-        newTarget();
-      }, 220);
-    } else {
-      combo = 0;
-      if (chain.length > 1) { gridEl.classList.remove('shake'); void gridEl.offsetWidth; gridEl.classList.add('shake'); ctx.sound('wrong'); }
-    }
-    chain = []; showSum();
-  };
-  gridEl.addEventListener('pointerup', release);
-  gridEl.addEventListener('pointercancel', release);
-  body.querySelector('.shuffle').addEventListener('click', () => {
-    if (over) return;
-    grid = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, roll)); draw(); left = Math.max(1, left - 5);
-  });
-  const timer = setInterval(() => {
-    if (over) return;
-    left--; body.querySelector('.gb-time').textContent = `${left}s`;
-    body.querySelector('.gb-time').classList.toggle('low', left <= 10);
-    if (left <= 0) end();
-  }, 1000);
-  const end = () => {
-    over = true; clearInterval(timer);
-    const xp = Math.min(80, Math.round(score / 25));
-    const isBest = ctx.recordBest('sumblast', score);
-    ctx.gameDone('sumblast', xp);
-    showResult(body, ctx, { title: 'Time!', big: score, unit: 'points', line: `${isBest ? 'New best! ' : ''}+${xp} XP`, again: () => startGame('sumblast', ctx), share: `I scored ${score} in Sum Blast on MathScroll. Beat that!` });
-  };
-  const stopSb = () => { over = true; clearInterval(timer); }; stopSb.onReplace = true;
-  ctx.openSheet('Sum Blast', body, 'tall', stopSb);
+  ({ blockblast: blockBlast, chess, g24: game24 })[id](ctx, ...args);
 }
 
 // ------------------------------------------------------------------ 24
@@ -216,7 +127,7 @@ export function mount24(container, ctx, { onSolve, compact = false } = {}) {
     ctx.sound('quest');
     render();
     if (cards.length === 1) {
-      if (v.n === 24 && v.d === 1) { msg('24! Nice.'); ctx.sound('correct'); root.classList.add('won'); setTimeout(() => { root.classList.remove('won'); onSolve?.(); }, 700); }
+      if (v.n === 24 && v.d === 1) { msg('24! Nice.'); ctx.sound('correct'); root.classList.add('won'); { const b = root.getBoundingClientRect(); burst(b.left + b.width / 2, b.top + b.height / 3, { color: ['#4ade80', '#facc15', '#60a5fa'], n: 24 }); popText(b.left + b.width / 2, b.top + b.height / 3, '24!'); } setTimeout(() => { root.classList.remove('won'); onSolve?.(); }, 700); }
       else { msg(`That makes ${fstr(v)}, not 24. Undo and try again.`); ctx.sound('wrong'); }
     }
   };
@@ -259,112 +170,9 @@ function game24(ctx) {
   ctx.openSheet('24', body, 'tall', stop24);
 }
 
-// ------------------------------------------------------------------ Queens
-function queens(ctx, N = null) {
-  const level = N || Math.min(8, Math.max(4, (ctx.bests().queens || 3) + 1));
-  let Q = new Set();
-  const start = Date.now(); let moves = 0;
-  const body = el(`<div class="queens"><div class="gb-top"><span>${level}×${level}</span><span class="gb-target">Place <b>${level}</b> queens</span><span class="q-count">0/${level}</span></div>
-    <div class="q-board" style="--n:${level}"></div>
-    <p class="small">A queen attacks along its row, column and both diagonals. Tap a square to place or remove a queen.</p>
-    <div class="gb-actions"><button class="btn ghost small q-clear">Clear</button>${level > 4 ? '<button class="btn ghost small q-easier">Smaller board</button>' : ''}</div></div>`);
-  const board = body.querySelector('.q-board');
-  const attacks = (a, b) => { const [r1, c1] = a.split(',').map(Number); const [r2, c2] = b.split(',').map(Number); return r1 === r2 || c1 === c2 || Math.abs(r1 - r2) === Math.abs(c1 - c2); };
-  const render = () => {
-    board.innerHTML = '';
-    const list = [...Q];
-    const bad = new Set(list.filter((a) => list.some((b) => b !== a && attacks(a, b))));
-    for (let r = 0; r < level; r++) {
-      for (let c = 0; c < level; c++) {
-        const k = `${r},${c}`;
-        const hit = !Q.has(k) && list.some((q) => attacks(q, k));
-        const sq = el(`<button class="q-sq ${(r + c) % 2 ? 'dark' : 'light'} ${hit ? 'hit' : ''} ${bad.has(k) ? 'bad' : ''}" aria-label="Row ${r + 1}, column ${c + 1}">${Q.has(k) ? '♛' : ''}</button>`);
-        sq.addEventListener('click', () => { if (Q.has(k)) Q.delete(k); else Q.add(k); moves++; ctx.sound(Q.has(k) ? 'quest' : 'wrong'); render(); check(); });
-        board.appendChild(sq);
-      }
-    }
-    body.querySelector('.q-count').textContent = `${Q.size}/${level}`;
-  };
-  const check = () => {
-    const list = [...Q];
-    if (list.length !== level || list.some((a) => list.some((b) => b !== a && attacks(a, b)))) return;
-    const secs = Math.round((Date.now() - start) / 1000);
-    const xp = level * 10;
-    ctx.recordBest('queens', level);
-    ctx.gameDone('queens', xp);
-    ctx.sound('level');
-    setTimeout(() => showResult(body, ctx, { title: 'Solved!', big: `${level}×${level}`, unit: '', line: `${secs}s · ${moves} moves · +${xp} XP`, again: () => startGame('queens', ctx, Math.min(8, level + 1)), againLabel: level < 8 ? `Try ${level + 1}×${level + 1}` : 'Play again', share: `I solved the ${level}-queens puzzle on MathScroll in ${secs}s!` }), 500);
-  };
-  body.querySelector('.q-clear').addEventListener('click', () => { Q = new Set(); render(); });
-  body.querySelector('.q-easier')?.addEventListener('click', () => queens(ctx, level - 1));
-  render();
-  ctx.openSheet('Queens', body, 'tall');
-}
-
-// ------------------------------------------------------------------ Mental Math Rush
-function rushQuestion(level) {
-  const pick = (a, b) => a + rnd(b - a + 1);
-  const kinds = level < 4 ? ['add', 'sub', 'mul'] : level < 8 ? ['add', 'sub', 'mul', 'div', 'sq'] : ['add', 'sub', 'mul', 'div', 'sq', 'pct', 'mul2'];
-  const k = kinds[rnd(kinds.length)];
-  const big = level >= 6;
-  if (k === 'add') { const a = pick(big ? 23 : 5, big ? 199 : 49); const b = pick(big ? 17 : 3, big ? 149 : 49); return { q: `${a} + ${b}`, a: a + b }; }
-  if (k === 'sub') { const a = pick(big ? 60 : 12, big ? 250 : 80); const b = pick(3, a - 1); return { q: `${a} − ${b}`, a: a - b }; }
-  if (k === 'mul') { const a = pick(2, big ? 15 : 12); const b = pick(2, 12); return { q: `${a} × ${b}`, a: a * b }; }
-  if (k === 'div') { const b = pick(2, 12); const a = b * pick(2, 12); return { q: `${a} ÷ ${b}`, a: a / b }; }
-  if (k === 'sq') { const a = pick(4, big ? 25 : 15); return { q: `${a}²`, a: a * a }; }
-  if (k === 'pct') { const p = [10, 20, 25, 50, 75][rnd(5)]; const a = pick(1, 20) * 20; return { q: `${p}% of ${a}`, a: (p * a) / 100 }; }
-  const a = pick(11, 39); const b = pick(3, 9); return { q: `${a} × ${b}`, a: a * b };
-}
-function rush(ctx) {
-  const TIME = 60;
-  let left = TIME; let score = 0; let streak = 0; let level = 1; let over = false; let cur = rushQuestion(1); let typed = '';
-  const body = el(`<div class="rush"><div class="gb-top"><span class="gb-score">0</span><span class="r-streak"></span><span class="gb-time">${TIME}s</span></div>
-    <div class="r-q"></div><div class="r-a"></div>
-    <div class="r-pad">${['7', '8', '9', '4', '5', '6', '1', '2', '3', '−', '0', '⌫'].map((k) => `<button class="r-key" data-k="${k}">${k}</button>`).join('')}</div></div>`);
-  const show = () => { body.querySelector('.r-q').textContent = `${cur.q} = ?`; body.querySelector('.r-a').textContent = typed || ' '; };
-  const press = (k) => {
-    if (over) return;
-    if (k === '⌫') typed = typed.slice(0, -1);
-    else if (k === '−') typed = typed.startsWith('-') ? typed.slice(1) : `-${typed}`;
-    else if (typed.replace('-', '').length < 6) typed += k;
-    show();
-    const v = Number(typed);
-    if (typed && typed !== '-' && v === cur.a) {
-      score++; streak++; level = 1 + Math.floor(score / 4);
-      body.querySelector('.gb-score').textContent = score;
-      body.querySelector('.r-streak').textContent = streak >= 3 ? `🔥 ${streak}` : '';
-      ctx.sound('correct');
-      body.querySelector('.r-a').classList.add('ok'); setTimeout(() => body.querySelector('.r-a').classList.remove('ok'), 180);
-      typed = ''; cur = rushQuestion(level); show();
-    } else if (String(cur.a).length <= typed.replace('-', '').length && v !== cur.a && !String(cur.a).startsWith(typed)) {
-      // Wrong answer: lose 2 seconds and the streak.
-      streak = 0; left = Math.max(0, left - 2); ctx.sound('wrong');
-      body.querySelector('.r-streak').textContent = '';
-      const a = body.querySelector('.r-a'); a.classList.remove('shake'); void a.offsetWidth; a.classList.add('shake');
-      typed = ''; setTimeout(show, 200);
-    }
-  };
-  body.querySelectorAll('.r-key').forEach((b) => b.addEventListener('pointerdown', (e) => { e.preventDefault(); press(b.dataset.k); }));
-  const onKey = (e) => { if (/^[0-9]$/.test(e.key)) press(e.key); else if (e.key === 'Backspace') press('⌫'); else if (e.key === '-') press('−'); };
-  document.addEventListener('keydown', onKey);
-  show();
-  const timer = setInterval(() => {
-    if (over) return;
-    left--; body.querySelector('.gb-time').textContent = `${left}s`;
-    body.querySelector('.gb-time').classList.toggle('low', left <= 10);
-    if (left <= 0) {
-      over = true; clearInterval(timer); document.removeEventListener('keydown', onKey);
-      const xp = score * 2; const isBest = ctx.recordBest('rush', score);
-      ctx.gameDone('rush', xp);
-      showResult(body, ctx, { title: 'Time!', big: score, unit: 'correct', line: `${isBest ? 'New best! ' : ''}+${xp} XP`, again: () => rush(ctx), share: `I got ${score} right in 60 seconds of Mental Math Rush on MathScroll!` });
-    }
-  }, 1000);
-  const stopRush = () => { over = true; clearInterval(timer); document.removeEventListener('keydown', onKey); }; stopRush.onReplace = true;
-  ctx.openSheet('Mental Math Rush', body, 'tall', stopRush);
-}
-
 // ------------------------------------------------------------------ shared result screen
 function showResult(body, ctx, { title, big, unit, line, again, againLabel, share }) {
+  if (/best/i.test(line || '')) confetti();
   body.innerHTML = `<div class="sprint-done game-done"><small class="gd-title">${title}</small><div class="score">${big}<small> ${unit}</small></div><p>${line}</p>
     <button class="btn wide again">${againLabel || 'Play again'}</button><button class="btn ghost wide share-g">Share</button><button class="btn ghost wide more-g">More games</button></div>`;
   body.querySelector('.again').addEventListener('click', again);
@@ -496,7 +304,13 @@ function blockBlast(ctx) {
       const doomed = new Set();
       rows.forEach((r) => { for (let c = 0; c < N; c++) doomed.add(`${r},${c}`); });
       cols.forEach((c) => { for (let r = 0; r < N; r++) doomed.add(`${r},${c}`); });
-      doomed.forEach((k) => { const [r, c] = k.split(',').map(Number); cellEl(r, c).classList.add('blast'); board[r][c] = null; });
+      doomed.forEach((k) => {
+        const [r, c] = k.split(',').map(Number); const ce = cellEl(r, c); const b = ce.getBoundingClientRect();
+        burst(b.left + b.width / 2, b.top + b.height / 2, { color: board[r][c] || '#facc15', n: 4, spread: 50, size: 7 });
+        ce.classList.add('blast'); board[r][c] = null;
+      });
+      { const b = boardEl.getBoundingClientRect(); popText(b.left + b.width / 2, b.top + b.height / 2, `+${pts}${combo > 1 ? ` ×${combo}` : ''}`); }
+      if (lines >= 3) confetti();
       setTimeout(() => boardEl.querySelectorAll('.blast').forEach((e) => e.classList.remove('blast')), 380);
       ctx.sound(lines >= 2 ? 'crit' : 'correct');
       const comboEl = body.querySelector('.bb-combo');
@@ -663,7 +477,7 @@ async function chess(ctx) {
     const xp = solved ? Math.max(10, Math.min(40, Math.round((puzzle.rating - 400) / 60))) : 2;
     ctx.recordBest('chess', res.rating);
     ctx.gameDone('chess', xp);
-    if (solved) { setStatus(`Solved! +${xp} XP`, 'ok'); ctx.sound('level'); } else setStatus('Puzzle failed', 'no');
+    if (solved) { setStatus(`Solved! +${xp} XP`, 'ok'); ctx.sound('level'); confetti(); } else setStatus('Puzzle failed', 'no');
     body.querySelector('.ch-hint').hidden = true;
     body.querySelector('.ch-next').hidden = false;
     body.querySelector('.ch-sol').hidden = solved;

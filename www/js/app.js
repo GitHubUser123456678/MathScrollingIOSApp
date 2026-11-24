@@ -84,7 +84,7 @@ function markSeen(id) {
       d.loginBonus = true;
       const streak = dayStreak();
       const bonus = 10 + 2 * Math.min(streak, 20);
-      setTimeout(() => { gainXp(bonus); toast(streak > 1 ? `Day ${streak} streak! +${bonus} XP` : `Welcome back! +${bonus} XP`); }, 900);
+      setTimeout(() => { gainXp(bonus); toast(streak > 1 ? `Day ${streak} streak! +${bonus} XP` : Object.keys(state.days).length > 1 ? `Welcome back! +${bonus} XP` : `Welcome! +${bonus} XP for your first day`); }, 900);
     }
     questEvent('seen');
   }
@@ -690,7 +690,7 @@ function isOutlier(card) {
 const INTERSTITIALS = ['lightning', 'q24', 'course', 'lightning', 'gotd', 'q24', 'lightning', 'course'];
 let sinceGame = 0; let interIdx = 0;
 async function fetchCard() {
-  if (state.tab === 'mix' && ++sinceGame >= 8) {
+  if (state.tab === 'mix' && ++sinceGame >= 8 && state.cards.filter((c) => c.data.source !== 'game').length >= 5) {
     sinceGame = 0;
     const kind = INTERSTITIALS[interIdx++ % INTERSTITIALS.length];
     return { id: `game:${kind}:${Date.now()}`, source: 'game', kind, heading: kind };
@@ -2361,8 +2361,8 @@ function buildLightningCard(data) {
       const xp = right * 4;
       if (xp) gainXp(xp, slot);
       questEvent('game'); checkBadges();
-      slot.innerHTML = `<div class="lt-done"><b>${right}/3</b><span>${right === 3 ? 'Flawless! ' : ''}${xp ? `+${xp} XP` : 'Better luck next round'}</span></div><button class="btn ghost small lt-more">Play a full round</button>`;
-      $('.lt-more', slot).addEventListener('click', () => startGame(`qf_${kind}`, gameCtx));
+      slot.innerHTML = `<div class="lt-done"><b>${right}/3</b><span>${right === 3 ? 'Flawless! ' : ''}${xp ? `+${xp} XP` : 'Better luck next round'}</span></div><button class="btn ghost small lt-more">Play Math Blitz</button>`;
+      $('.lt-more', slot).addEventListener('click', () => startGame('blitz', gameCtx));
       return;
     }
     const q = quickQuestion(ctx, kind);
@@ -2714,7 +2714,13 @@ function openWelcome() {
   const topicChips = PROBLEM_TOPICS.map((t) => `<button class="chip on" data-topic="${t}">${t}</button>`).join('');
   body.innerHTML = `
     <div class="welcome-hero"><div class="brand big">∑</div><h2>Scroll maths, not videos.</h2>
-      <p>Swipe up for the next card. Tap A–E to answer and double-tap to like. Every few problems is a <b>focus problem</b>: the feed pauses for a few seconds so you can really have a go. Solutions unlock once you've thought about it.</p></div>
+      <p>Swipe up for the next card, tap to answer, double-tap to like. Every few cards is a <b>focus problem</b>: the feed pauses so you can really have a go.</p></div>
+    <div class="welcome-tour">
+      <div><span>📜</span><b>Feed</b><small>Real contest problems, theorems and sequences</small></div>
+      <div><span>🎓</span><b>Learn</b><small>Courses from prealgebra to the IMO, with lectures</small></div>
+      <div><span>🎮</span><b>Games</b><small>12 maths games, from Number Ninja to chess puzzles</small></div>
+      <div><span>⚡</span><b>Charges</b><small>Every right answer earns ⚡ to spend on games</small></div>
+    </div>
     <h3>What do you want to see?</h3><div class="chips">${srcChips}</div>
     <h3>Favourite topics</h3><div class="chips">${topicChips}</div>
     <button class="btn wide start">Start scrolling</button>`;

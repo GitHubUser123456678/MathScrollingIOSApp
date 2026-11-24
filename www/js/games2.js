@@ -18,6 +18,7 @@ function options(answer, spread = 3, min = -Infinity) {
 }
 
 function result(body, ctx, { id, title, big, unit = '', line = '', again, share }) {
+  if (/best|Solved|Cleared|Cracked|matched/i.test(`${title} ${line}`)) confetti();
   body.innerHTML = `<div class="sprint-done game-done"><small class="gd-title">${title}</small><div class="score">${big}<small> ${unit}</small></div><p>${line}</p>
     <button class="btn wide again">Play again</button><button class="btn ghost wide share-g">Share</button><button class="btn ghost wide more-g">More games</button></div>`;
   body.querySelector('.again').addEventListener('click', again);
@@ -30,55 +31,6 @@ function done(ctx, body, id, score, xp, opts) {
   result(body, ctx, { id, ...opts, line: `${best ? 'New best! ' : ''}+${gained} XP${opts.line ? ` · ${opts.line}` : ''}` });
 }
 const stopper = (fn) => Object.assign(fn, { onReplace: true });
-
-// ------------------------------------------------------------------ quick-fire engine
-// gen(level) → { q: html, choices: [html…], answer: index, why?: text shown after a miss }
-function quickfire(ctx, cfg) {
-  const TIME = cfg.time || 60;
-  let left = TIME; let score = 0; let streak = 0; let best = 0; let level = 1; let over = false; let cur; let lock = false;
-  const body = el(`<div class="quickfire">
-    <div class="gb-top"><span class="gb-score">0</span><span class="r-streak"></span><span class="gb-time">${TIME}s</span></div>
-    <div class="qf-q"></div><div class="qf-choices"></div><p class="qf-why small"></p></div>`);
-  const next = () => {
-    cur = cfg.gen(level);
-    body.querySelector('.qf-q').innerHTML = cur.q;
-    body.querySelector('.qf-why').textContent = '';
-    const box = body.querySelector('.qf-choices');
-    box.className = `qf-choices n${cur.choices.length}`;
-    box.innerHTML = cur.choices.map((c, i) => `<button class="qf-c" data-i="${i}">${c}</button>`).join('');
-    lock = false;
-  };
-  body.querySelector('.qf-choices').addEventListener('click', (e) => {
-    const b = e.target.closest('.qf-c'); if (!b || lock || over) return;
-    lock = true;
-    const ok = +b.dataset.i === cur.answer;
-    b.classList.add(ok ? 'right' : 'wrong');
-    if (ok) {
-      score++; streak++; best = Math.max(best, streak); level = 1 + Math.floor(score / 4);
-      ctx.sound(streak % 5 === 0 ? 'crit' : 'correct');
-      if (streak % 5 === 0) { left += 3; ctx.toast(`${streak} in a row — +3s`); }
-      setTimeout(next, 220);
-    } else {
-      streak = 0; left = Math.max(0, left - 3); ctx.sound('wrong');
-      body.querySelectorAll('.qf-c')[cur.answer]?.classList.add('right');
-      if (cur.why) body.querySelector('.qf-why').textContent = cur.why;
-      setTimeout(next, cur.why ? 1300 : 700);
-    }
-    body.querySelector('.gb-score').textContent = score;
-    body.querySelector('.r-streak').textContent = streak >= 3 ? `🔥 ${streak}` : '';
-  });
-  next();
-  const timer = setInterval(() => {
-    if (over) return;
-    left--; body.querySelector('.gb-time').textContent = `${left}s`;
-    body.querySelector('.gb-time').classList.toggle('low', left <= 10);
-    if (left <= 0) {
-      over = true; clearInterval(timer);
-      done(ctx, body, cfg.id, score, Math.min(90, score * 3), { title: 'Time!', big: score, unit: 'correct', line: `best streak ${best}`, again: () => ctx.startGame(cfg.id), share: `I got ${score} right in ${cfg.title} on MathScroll!` });
-    }
-  }, 1000);
-  ctx.openSheet(cfg.title, body, 'tall', stopper(() => { over = true; clearInterval(timer); }));
-}
 
 const GEN = {
   prime(level) {
@@ -191,19 +143,6 @@ const GEN = {
 const round = (v) => (Number.isInteger(v) ? v : v.toFixed(3));
 let texFn = (s) => s;
 const ctx2tex = (s) => texFn(s);
-
-export const QUICKFIRE = [
-  { id: 'qf_prime', gen: 'prime', title: 'Prime or Not', icon: '🔍', blurb: 'Is it prime? Watch out for 91 and 221.' },
-  { id: 'qf_compare', gen: 'compare', title: 'Which Is Bigger?', icon: '⚖️', blurb: 'Powers, fractions, roots and factorials, head to head.' },
-  { id: 'qf_sequence', gen: 'sequence', title: 'Next in Line', icon: '🔗', blurb: 'Spot the pattern and pick the next term.' },
-  { id: 'qf_solvex', gen: 'solvex', title: 'Solve for x', icon: '𝑥', blurb: 'Equations at speed, from 2x+3 to quadratics.' },
-  { id: 'qf_estimate', gen: 'estimate', title: 'Estimation Station', icon: '🎯', blurb: 'Roots, products, circles and logs: get close.' },
-  { id: 'qf_binary', gen: 'binary', title: 'Binary Bits', icon: '💾', blurb: 'Read and write numbers in base 2.' },
-  { id: 'qf_angle', gen: 'angle', title: 'Angle Eye', icon: '📐', blurb: 'Judge angles by eye.' },
-  { id: 'qf_units', gen: 'units', title: 'Last Digit', icon: '🔚', blurb: 'The last digit of huge powers, using cycles.' },
-  { id: 'qf_divisors', gen: 'divisors', title: 'Divisor Count', icon: '➗', blurb: 'How many divisors? Use prime factorisation.' },
-  { id: 'qf_mod', gen: 'mod', title: 'Clock Maths', icon: '🕐', blurb: 'Remainders and modular powers.' },
-];
 
 // ------------------------------------------------------------------ 2048
 function g2048(ctx) {
@@ -323,82 +262,6 @@ function mines(ctx) {
   body._test = { mines: () => mine, dig: (i) => grid.querySelector(`[data-i="${i}"]`).click() };
 }
 
-// ------------------------------------------------------------------ Lights Out
-function lights(ctx, level = 1) {
-  const N = 5; let on = Array(N * N).fill(false); let moves = 0; let over = false;
-  const press = (i, arr = on) => { const r = Math.floor(i / N); const c = i % N; [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dr, dc]) => { const rr = r + dr; const cc = c + dc; if (rr >= 0 && rr < N && cc >= 0 && cc < N) arr[rr * N + cc] = !arr[rr * N + cc]; }); };
-  const taps = shuffle([...Array(N * N).keys()]).slice(0, Math.min(3 + level * 2, 15)); // solvable: built from real presses
-  taps.forEach((i) => press(i));
-  const body = el(`<div class="lights"><div class="gb-top"><span>Level ${level}</span><span class="small">Turn every light off</span><span class="l-moves">0 moves</span></div><div class="l-grid"></div><p class="small">Pressing a light flips it and its neighbours. (It’s linear algebra over ℤ/2!)</p></div>`);
-  const grid = body.querySelector('.l-grid');
-  const draw = () => { grid.innerHTML = on.map((v, i) => `<button class="l-c ${v ? 'on' : ''}" data-i="${i}"></button>`).join(''); body.querySelector('.l-moves').textContent = `${moves} moves`; };
-  grid.addEventListener('click', (e) => {
-    const c = e.target.closest('.l-c'); if (!c || over) return;
-    press(+c.dataset.i); moves++; ctx.sound('quest'); draw();
-    if (on.every((v) => !v)) {
-      over = true; ctx.sound('level');
-      ctx.recordBest('lights', level); ctx.gameDone('lights', 10 + level * 5);
-      setTimeout(() => { const p = el(`<div class="bb-stuck"><b>Lights out!</b><p>Level ${level} in ${moves} moves (fewest possible ≤ ${taps.length})</p><button class="btn wide nx">Level ${level + 1}</button><button class="btn ghost wide more-g">More games</button></div>`); body.appendChild(p); p.querySelector('.nx').addEventListener('click', () => lights(ctx, level + 1)); p.querySelector('.more-g').addEventListener('click', () => ctx.openGames()); }, 400);
-    }
-  });
-  draw();
-  ctx.openSheet('Lights Out', body, 'tall');
-  body._test = { taps };
-}
-
-// ------------------------------------------------------------------ Tower of Hanoi
-function hanoi(ctx, n = 3) {
-  let pegs = [[...Array(n).keys()].map((k) => n - k), [], []]; let held = null; let moves = 0; let over = false;
-  const min = 2 ** n - 1;
-  const body = el(`<div class="hanoi"><div class="gb-top"><span>${n} discs</span><span class="small">Best possible: ${min}</span><span class="h-moves">0 moves</span></div><div class="h-pegs"></div><p class="small">Move the tower to the right peg. Never put a bigger disc on a smaller one. Tap a peg to pick up, tap another to drop.</p></div>`);
-  const box = body.querySelector('.h-pegs');
-  const draw = () => {
-    box.innerHTML = pegs.map((p, i) => `<button class="h-peg ${held === i ? 'held' : ''}" data-i="${i}"><span class="h-pole"></span>${p.map((d, k) => `<span class="h-disc" style="--w:${30 + (60 * d) / n}%;--h:${(d * 47) % 360};bottom:${8 + k * 22}px">${''}</span>`).join('')}</button>`).join('');
-    body.querySelector('.h-moves').textContent = `${moves} moves`;
-  };
-  box.addEventListener('click', (e) => {
-    const p = e.target.closest('.h-peg'); if (!p || over) return;
-    const i = +p.dataset.i;
-    if (held === null) { if (pegs[i].length) { held = i; ctx.sound('quest'); } }
-    else {
-      const d = pegs[held][pegs[held].length - 1]; const top = pegs[i][pegs[i].length - 1];
-      if (i !== held && (top === undefined || top > d)) { pegs[i].push(pegs[held].pop()); moves++; ctx.sound('correct'); } else if (i !== held) ctx.sound('wrong');
-      held = null;
-    }
-    draw();
-    if (pegs[2].length === n) {
-      over = true; ctx.sound('level');
-      ctx.recordBest('hanoi', n); ctx.gameDone('hanoi', 10 + n * 8 + (moves === min ? 15 : 0));
-      setTimeout(() => { const pnl = el(`<div class="bb-stuck"><b>${moves === min ? 'Perfect!' : 'Solved!'}</b><p>${moves} moves (best possible ${min} = 2<sup>${n}</sup> − 1)</p>${n < 8 ? `<button class="btn wide nx">Try ${n + 1} discs</button>` : ''}<button class="btn ghost wide more-g">More games</button></div>`); body.appendChild(pnl); pnl.querySelector('.nx')?.addEventListener('click', () => hanoi(ctx, n + 1)); pnl.querySelector('.more-g').addEventListener('click', () => ctx.openGames()); }, 300);
-    }
-  });
-  draw();
-  ctx.openSheet('Tower of Hanoi', body, 'tall');
-}
-
-// ------------------------------------------------------------------ 15-puzzle
-function fifteen(ctx, N = 4) {
-  let t = [...Array(N * N).keys()].map((k) => (k + 1) % (N * N)); // 0 = gap, at the end
-  let gap = N * N - 1; let moves = 0; let over = false; const start = Date.now();
-  const nbrs = (i) => [i - N, i + N, i % N ? i - 1 : -1, (i + 1) % N ? i + 1 : -1].filter((j) => j >= 0 && j < N * N);
-  for (let k = 0, prev = -1; k < 200 * N; k++) { const opts = nbrs(gap).filter((j) => j !== prev); const j = pick(opts); [t[gap], t[j]] = [t[j], t[gap]]; prev = gap; gap = j; }
-  const body = el(`<div class="fifteen"><div class="gb-top"><span>${N}×${N}</span><span class="small">Put the numbers in order</span><span class="f-moves">0 moves</span></div><div class="f-grid" style="--n:${N}"></div></div>`);
-  const grid = body.querySelector('.f-grid');
-  const draw = () => { grid.innerHTML = t.map((v, i) => `<button class="f-c ${v ? '' : 'gap'} ${v && v === i + 1 ? 'home' : ''}" data-i="${i}">${v || ''}</button>`).join(''); body.querySelector('.f-moves').textContent = `${moves} moves`; };
-  grid.addEventListener('click', (e) => {
-    const c = e.target.closest('.f-c'); if (!c || over) return;
-    const i = +c.dataset.i; if (!nbrs(gap).includes(i)) return;
-    [t[gap], t[i]] = [t[i], t[gap]]; gap = i; moves++; ctx.sound('quest'); draw();
-    if (t.every((v, k) => v === (k + 1) % (N * N))) {
-      over = true; const secs = Math.round((Date.now() - start) / 1000); ctx.sound('level');
-      setTimeout(() => done(ctx, body, 'fifteen', Math.max(10, 1000 - moves * 2 - secs), N === 3 ? 30 : 60, { title: 'Solved!', big: moves, unit: 'moves', line: `${secs}s`, again: () => ctx.startGame('fifteen'), share: `I solved the 15-puzzle in ${moves} moves on MathScroll!` }), 400);
-    }
-  });
-  draw();
-  ctx.openSheet(`${N * N - 1}-Puzzle`, body, 'tall', stopper(() => { over = true; }));
-  body._test = { solve: () => { t = [...Array(N * N).keys()].map((k) => (k + 1) % (N * N)); [t[N * N - 1], t[N * N - 2]] = [t[N * N - 2], t[N * N - 1]]; gap = N * N - 2; draw(); } };
-}
-
 // ------------------------------------------------------------------ Mastermind (bulls & cows)
 function mastermind(ctx) {
   const secret = shuffle([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).slice(0, 4).join('');
@@ -483,46 +346,6 @@ function nim(ctx, wins = 0) {
   ctx.openSheet('Nim', body, 'tall', stopper(() => { over = true; }));
 }
 
-// ------------------------------------------------------------------ Magic square
-function magic(ctx, N = 3) {
-  const target = (N * (N * N + 1)) / 2;
-  // A random 3×3 or 4×4 magic square (rotations/reflections of standard ones), then hide some cells.
-  let sq = N === 3 ? [8, 1, 6, 3, 5, 7, 4, 9, 2] : [16, 2, 3, 13, 5, 11, 10, 8, 9, 7, 6, 12, 4, 14, 15, 1];
-  const rot = (a) => a.map((_, i) => a[(N - 1 - (i % N)) * N + Math.floor(i / N)]);
-  for (let k = rnd(4); k > 0; k--) sq = rot(sq);
-  if (rnd(2)) sq = sq.map((_, i) => sq[Math.floor(i / N) * N + (N - 1 - (i % N))]);
-  const hidden = new Set(shuffle([...Array(N * N).keys()]).slice(0, N === 3 ? 6 : 9));
-  const cur = sq.map((v, i) => (hidden.has(i) ? 0 : v)); let sel = [...hidden][0]; let over = false;
-  const body = el(`<div class="magic"><div class="gb-top"><span>${N}×${N}</span><span class="small">Every row, column and diagonal adds to <b>${target}</b></span></div><div class="mg-grid" style="--n:${N}"></div><div class="mg-sums small"></div>
-    <div class="mg-pad">${[...Array(N * N).keys()].map((k) => `<button class="r-key" data-d="${k + 1}">${k + 1}</button>`).join('')}<button class="r-key" data-d="0">⌫</button></div></div>`);
-  const grid = body.querySelector('.mg-grid');
-  const sums = () => { const out = []; for (let r = 0; r < N; r++) out.push(cur.slice(r * N, r * N + N)); return out; };
-  const draw = () => {
-    grid.innerHTML = cur.map((v, i) => `<button class="mg-c ${hidden.has(i) ? '' : 'given'} ${i === sel ? 'sel' : ''}" data-i="${i}">${v || ''}</button>`).join('');
-    const rows = sums().map((r) => r.reduce((a, b) => a + b, 0));
-    body.querySelector('.mg-sums').textContent = `Row sums: ${rows.join(', ')}`;
-    body.querySelectorAll('.mg-pad [data-d]').forEach((b) => b.classList.toggle('used', +b.dataset.d > 0 && cur.includes(+b.dataset.d)));
-  };
-  grid.addEventListener('click', (e) => { const c = e.target.closest('.mg-c'); if (!c || !hidden.has(+c.dataset.i)) return; sel = +c.dataset.i; draw(); });
-  body.querySelector('.mg-pad').addEventListener('click', (e) => {
-    const k = e.target.closest('[data-d]'); if (!k || over) return;
-    const d = +k.dataset.d; if (d && cur.includes(d)) return;
-    cur[sel] = d; ctx.sound('quest'); draw();
-    const lines = []; for (let i = 0; i < N; i++) { lines.push([...Array(N).keys()].map((j) => cur[i * N + j])); lines.push([...Array(N).keys()].map((j) => cur[j * N + i])); }
-    lines.push([...Array(N).keys()].map((j) => cur[j * N + j])); lines.push([...Array(N).keys()].map((j) => cur[j * N + N - 1 - j]));
-    if (cur.every(Boolean) && lines.every((l) => l.reduce((a, b) => a + b, 0) === target)) {
-      over = true; ctx.sound('level');
-      ctx.recordBest('magic', N); ctx.gameDone('magic', N === 3 ? 25 : 60);
-      setTimeout(() => { const p = el(`<div class="bb-stuck"><b>Magic!</b><p>Every line adds to ${target}.</p>${N === 3 ? '<button class="btn wide nx">Try 4×4</button>' : '<button class="btn wide nx">Another 4×4</button>'}<button class="btn ghost wide more-g">More games</button></div>`); body.appendChild(p); p.querySelector('.nx').addEventListener('click', () => magic(ctx, 4)); p.querySelector('.more-g').addEventListener('click', () => ctx.openGames()); }, 300);
-    } else {
-      const nxt = [...hidden].find((i) => !cur[i]); if (nxt != null) { sel = nxt; draw(); }
-    }
-  });
-  draw();
-  ctx.openSheet('Magic Square', body, 'tall');
-  body._test = { answer: () => sq, hidden: () => [...hidden] };
-}
-
 // ------------------------------------------------------------------ Memory match
 const PAIRS = [
   ['\\frac12', '0.5'], ['\\frac14', '25\\%'], ['\\frac34', '0.75'], ['2^5', '32'], ['\\sqrt{49}', '7'], ['3!', '6'], ['\\frac{1}{5}', '20\\%'],
@@ -554,22 +377,322 @@ function memory(ctx) {
   body._test = { cards };
 }
 
+// ------------------------------------------------------------------ effects
+let layer = null;
+const fxLayer = () => { if (!layer || !layer.isConnected) { layer = el('<div id="fx-layer"></div>'); document.body.appendChild(layer); } return layer; };
+// Particles bursting out of a screen point.
+export function burst(x, y, { color = '#facc15', n = 14, spread = 90, size = 8 } = {}) {
+  const L = fxLayer();
+  for (let k = 0; k < n; k++) {
+    const d = el(`<i class="fx-p" style="left:${x}px;top:${y}px;width:${size}px;height:${size}px;background:${Array.isArray(color) ? pick(color) : color}"></i>`);
+    L.appendChild(d);
+    const a = Math.random() * Math.PI * 2; const r = spread * (0.4 + Math.random() * 0.8);
+    d.animate([{ transform: 'translate(-50%,-50%) scale(1)', opacity: 1 }, { transform: `translate(calc(-50% + ${Math.cos(a) * r}px), calc(-50% + ${Math.sin(a) * r + 30}px)) scale(.2)`, opacity: 0 }], { duration: 550 + Math.random() * 300, easing: 'cubic-bezier(.2,.7,.3,1)' }).onfinish = () => d.remove();
+  }
+}
+export function popText(x, y, text, color = '#facc15') {
+  const d = el(`<b class="fx-t" style="left:${x}px;top:${y}px;color:${color}">${text}</b>`);
+  fxLayer().appendChild(d);
+  d.animate([{ transform: 'translate(-50%,-50%) scale(.6)', opacity: 0 }, { transform: 'translate(-50%,-90%) scale(1.15)', opacity: 1, offset: 0.25 }, { transform: 'translate(-50%,-180%) scale(1)', opacity: 0 }], { duration: 900, easing: 'ease-out' }).onfinish = () => d.remove();
+}
+export function confetti() {
+  const W = window.innerWidth;
+  for (let k = 0; k < 70; k++) {
+    const d = el(`<i class="fx-c" style="left:${Math.random() * W}px;background:${pick(['#f87171', '#facc15', '#4ade80', '#60a5fa', '#c084fc', '#fb923c'])}"></i>`);
+    fxLayer().appendChild(d);
+    d.animate([{ transform: `translateY(-20px) rotate(0deg)`, opacity: 1 }, { transform: `translate(${(Math.random() - 0.5) * 160}px, ${window.innerHeight + 40}px) rotate(${Math.random() * 720}deg)`, opacity: 0.9 }], { duration: 1600 + Math.random() * 1400, delay: Math.random() * 300, easing: 'cubic-bezier(.3,.6,.5,1)' }).onfinish = () => d.remove();
+  }
+}
+const centerOf = (node) => { const b = node.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
+
+// ------------------------------------------------------------------ Math Blitz (mixed speed rounds, combos, fever)
+GEN.arith = (level) => {
+  const op = pick(level < 2 ? ['+', '−'] : level < 4 ? ['+', '−', '×'] : ['+', '−', '×', '÷']);
+  let a; let b; let ans;
+  if (op === '+') { a = between(5, 20 * level); b = between(5, 20 * level); ans = a + b; }
+  else if (op === '−') { a = between(10, 25 * level); b = between(1, a); ans = a - b; }
+  else if (op === '×') { a = between(3, 12); b = between(3, 9 + level); ans = a * b; }
+  else { b = between(2, 12); ans = between(2, 12); a = b * ans; }
+  const opts = options(ans, Math.max(3, Math.round(ans * 0.1)), 0);
+  return { q: `<div class="qf-big">${a} ${op} ${b}</div>`, choices: opts.map(String), answer: opts.indexOf(ans) };
+};
+const BLITZ_KINDS = ['arith', 'arith', 'compare', 'prime', 'sequence', 'solvex', 'estimate', 'units', 'divisors', 'mod', 'binary', 'angle'];
+function blitz(ctx) {
+  let left = 60; let score = 0; let combo = 0; let bestCombo = 0; let correct = 0; let over = false; let lock = false; let cur; let freezes = 0; let frozen = 0;
+  const body = el(`<div class="blitz"><div class="gb-top"><span class="gb-score">0</span><span class="bz-mult">×1</span><span class="gb-time">60s</span></div>
+    <div class="bz-meter"><i></i></div>
+    <div class="qf-q"></div><div class="qf-choices"></div>
+    <div class="bz-foot"><button class="btn ghost small bz-freeze" disabled>❄️ Freeze <b>0</b></button><span class="small bz-kind"></span></div></div>`);
+  const mult = () => Math.min(5, 1 + Math.floor(combo / 3)) * (combo >= 12 ? 2 : 1);
+  const hud = () => {
+    body.querySelector('.gb-score').textContent = score;
+    body.querySelector('.bz-mult').textContent = `×${mult()}${combo >= 12 ? ' 🔥 FEVER' : ''}`;
+    body.querySelector('.bz-meter i').style.width = `${Math.min(100, (combo / 12) * 100)}%`;
+    body.classList.toggle('fever', combo >= 12);
+    const f = body.querySelector('.bz-freeze'); f.disabled = !freezes || frozen > 0; f.querySelector('b').textContent = freezes;
+  };
+  const NAMES = { arith: 'Arithmetic', compare: 'Compare', prime: 'Primes', sequence: 'Sequences', solvex: 'Algebra', estimate: 'Estimation', units: 'Last digits', divisors: 'Divisors', mod: 'Remainders', binary: 'Binary', angle: 'Angles' };
+  const next = () => {
+    const kind = pick(BLITZ_KINDS.slice(0, Math.min(BLITZ_KINDS.length, 4 + correct)));
+    cur = GEN[kind](1 + Math.floor(correct / 5));
+    body.querySelector('.qf-q').innerHTML = cur.q;
+    body.querySelector('.bz-kind').textContent = NAMES[kind];
+    const box = body.querySelector('.qf-choices');
+    box.className = `qf-choices n${cur.choices.length}`;
+    box.innerHTML = cur.choices.map((c, i) => `<button class="qf-c" data-i="${i}">${c}</button>`).join('');
+    box.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 160 });
+    lock = false;
+  };
+  body.querySelector('.qf-choices').addEventListener('click', (e) => {
+    const b = e.target.closest('.qf-c'); if (!b || lock || over) return;
+    lock = true;
+    const ok = +b.dataset.i === cur.answer; const [x, y] = centerOf(b);
+    b.classList.add(ok ? 'right' : 'wrong');
+    if (ok) {
+      combo++; correct++; bestCombo = Math.max(bestCombo, combo);
+      const pts = 10 * mult(); score += pts;
+      burst(x, y, { color: combo >= 12 ? ['#f97316', '#facc15', '#ef4444'] : ['#4ade80', '#facc15'], n: 10 + Math.min(20, combo) });
+      popText(x, y - 20, `+${pts}`);
+      if (combo % 5 === 0) { left += 2; popText(x, y - 60, '+2s', '#60a5fa'); }
+      if (combo % 8 === 0) { freezes++; ctx.toast('❄️ Freeze earned!'); }
+      ctx.sound(combo % 5 === 0 ? 'crit' : 'correct');
+      setTimeout(next, 180);
+    } else {
+      combo = 0; left = Math.max(0, left - 3); ctx.sound('wrong'); popText(x, y - 20, '−3s', '#ef4444');
+      body.querySelectorAll('.qf-c')[cur.answer]?.classList.add('right');
+      body.animate([{ transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'none' }], { duration: 250 });
+      setTimeout(next, cur.why ? 1100 : 650);
+    }
+    hud();
+  });
+  body.querySelector('.bz-freeze').addEventListener('click', () => { if (!freezes || frozen) return; freezes--; frozen = 5; body.classList.add('frozen'); ctx.sound('quest'); hud(); });
+  next(); hud();
+  const timer = setInterval(() => {
+    if (over) return;
+    if (frozen > 0) { frozen--; if (!frozen) body.classList.remove('frozen'); hud(); return; }
+    left--; body.querySelector('.gb-time').textContent = `${left}s`;
+    body.querySelector('.gb-time').classList.toggle('low', left <= 10);
+    if (left <= 0) {
+      over = true; clearInterval(timer);
+      done(ctx, body, 'blitz', score, Math.min(120, Math.round(score / 12)), { title: 'Time!', big: score, unit: 'points', line: `${correct} correct · best combo ${bestCombo}`, again: () => ctx.startGame('blitz'), share: `I scored ${score} in Math Blitz on MathScroll (combo ${bestCombo})!` });
+    }
+  }, 1000);
+  ctx.openSheet('Math Blitz', body, 'tall', stopper(() => { over = true; clearInterval(timer); }));
+}
+
+// ------------------------------------------------------------------ canvas helper
+function makeCanvas(body, sel, heightFrac = 0.58) {
+  const c = body.querySelector(sel);
+  const W = Math.min(560, body.clientWidth || window.innerWidth - 32); const H = Math.round(Math.min(560, window.innerHeight * heightFrac));
+  const dpr = window.devicePixelRatio || 1;
+  c.width = W * dpr; c.height = H * dpr; c.style.width = `${W}px`; c.style.height = `${H}px`;
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { c, g, W, H };
+}
+
+// ------------------------------------------------------------------ Number Ninja
+const NINJA_RULES = [
+  { t: 'multiples of 3', f: (n) => n % 3 === 0, why: (n) => `${n} isn’t a multiple of 3` },
+  { t: 'even numbers', f: (n) => n % 2 === 0, why: (n) => `${n} is odd` },
+  { t: 'primes', f: isPrime, why: (n) => (n < 2 ? `${n} isn’t prime` : `${n} = ${factorise(n).join('×')}`) },
+  { t: 'perfect squares', f: (n) => Number.isInteger(Math.sqrt(n)), why: (n) => `${n} isn’t a square` },
+  { t: 'multiples of 4', f: (n) => n % 4 === 0, why: (n) => `${n} ÷ 4 isn’t whole` },
+  { t: 'multiples of 7', f: (n) => n % 7 === 0, why: (n) => `${n} isn’t a multiple of 7` },
+  { t: 'numbers with digit sum 9', f: (n) => [...String(n)].reduce((a, d) => a + +d, 0) === 9, why: (n) => `digits of ${n} add to ${[...String(n)].reduce((a, d) => a + +d, 0)}` },
+  { t: 'factors of 60', f: (n) => 60 % n === 0, why: (n) => `60 ÷ ${n} isn’t whole` },
+];
+function ninja(ctx) {
+  const body = el(`<div class="ninja"><div class="gb-top"><span class="gb-score">0</span><span class="nj-lives">❤️❤️❤️</span></div>
+    <div class="nj-rule">Slice <b></b></div><div class="nj-wrap"><canvas class="nj-canvas"></canvas><div class="nj-flash"></div></div>
+    <p class="small">Swipe through numbers that fit the rule. Let one fall or slice a wrong one and you lose a heart. Don’t slice 💣.</p></div>`);
+  ctx.openSheet('Number Ninja', body, 'tall', stopper(() => { over = true; }));
+  const { c, g, W, H } = makeCanvas(body, '.nj-canvas');
+  let objs = []; let bits = []; let trail = []; let score = 0; let lives = 3; let over = false; let t0 = performance.now(); let lastSpawn = 0; let ruleIdx = rnd(NINJA_RULES.length); let ruleAt = t0; let sliced = 0; let swipeCombo = 0;
+  const rule = () => NINJA_RULES[ruleIdx];
+  const setRule = () => { body.querySelector('.nj-rule b').textContent = rule().t; body.querySelector('.nj-rule').animate([{ transform: 'scale(1.25)', color: '#facc15' }, { transform: 'scale(1)' }], { duration: 500 }); };
+  setRule();
+  const drawLives = () => { body.querySelector('.nj-lives').textContent = '❤️'.repeat(lives) + '🖤'.repeat(Math.max(0, 3 - lives)); };
+  const spawn = (now) => {
+    const elapsed = (now - t0) / 1000;
+    const bomb = elapsed > 15 && Math.random() < 0.1;
+    let n;
+    if (Math.random() < 0.55) { const goods = [...Array(100).keys()].map((k) => k + 1).filter(rule().f); n = pick(goods); } else n = between(1, 99);
+    const x = W * (0.15 + Math.random() * 0.7);
+    objs.push({ x, y: H + 30, vx: (W / 2 - x) * (0.4 + Math.random() * 0.5) / 60, vy: -(Math.sqrt(2 * 0.22 * H * (0.55 + Math.random() * 0.35))), r: 28, n, bomb, hue: rnd(360), dead: false });
+  };
+  const flash = (color) => { const f = body.querySelector('.nj-flash'); f.style.background = color; f.animate([{ opacity: 0.45 }, { opacity: 0 }], { duration: 350 }); };
+  const loseLife = (msg, x, y) => {
+    lives--; drawLives(); ctx.sound('wrong'); flash('#ef4444');
+    const b = c.getBoundingClientRect(); popText(b.left + x, b.top + y, msg, '#f87171');
+    if (lives <= 0) end();
+  };
+  const end = () => {
+    if (over) return; over = true;
+    setTimeout(() => done(ctx, body, 'ninja', score, Math.min(120, Math.round(score / 10)), { title: 'Game over', big: score, unit: 'points', line: `${sliced} sliced`, again: () => ctx.startGame('ninja'), share: `I scored ${score} in Number Ninja on MathScroll!` }), 700);
+  };
+  const sliceAt = (o) => {
+    o.dead = true;
+    const b = c.getBoundingClientRect();
+    if (o.bomb) { burst(b.left + o.x, b.top + o.y, { color: ['#111', '#f97316', '#ef4444'], n: 30, spread: 140 }); loseLife('💥', o.x, o.y); return; }
+    if (rule().f(o.n)) {
+      swipeCombo++; sliced++;
+      const pts = 10 * swipeCombo; score += pts; body.querySelector('.gb-score').textContent = score;
+      burst(b.left + o.x, b.top + o.y, { color: `hsl(${o.hue} 85% 60%)`, n: 16 });
+      popText(b.left + o.x, b.top + o.y - 30, swipeCombo > 1 ? `+${pts} combo ×${swipeCombo}` : `+${pts}`);
+      bits.push({ x: o.x, y: o.y, vx: -2, vy: o.vy * 0.3, n: o.n, hue: o.hue, side: -1, a: 1 }, { x: o.x, y: o.y, vx: 2, vy: o.vy * 0.3, n: o.n, hue: o.hue, side: 1, a: 1 });
+      ctx.sound(swipeCombo > 1 ? 'crit' : 'correct');
+    } else loseLife(rule().why(o.n), o.x, o.y);
+  };
+  const segHits = (ax, ay, bx, by, o) => { const dx = bx - ax; const dy = by - ay; const L = dx * dx + dy * dy || 1; let t = ((o.x - ax) * dx + (o.y - ay) * dy) / L; t = Math.max(0, Math.min(1, t)); const px = ax + t * dx - o.x; const py = ay + t * dy - o.y; return px * px + py * py < o.r * o.r; };
+  let down = false;
+  const pt = (e) => { const b = c.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
+  c.addEventListener('pointerdown', (e) => { down = true; swipeCombo = 0; c.setPointerCapture(e.pointerId); trail = [[...pt(e), performance.now()]]; });
+  c.addEventListener('pointermove', (e) => {
+    if (!down || over) return;
+    const p = [...pt(e), performance.now()]; const q = trail[trail.length - 1] || p; trail.push(p);
+    for (const o of objs) if (!o.dead && segHits(q[0], q[1], p[0], p[1], o)) sliceAt(o);
+  });
+  const up = () => { down = false; swipeCombo = 0; };
+  c.addEventListener('pointerup', up); c.addEventListener('pointercancel', up);
+  const frame = (now) => {
+    if (over && !objs.length && !bits.length) return;
+    if (!body.isConnected) return;
+    const elapsed = (now - t0) / 1000;
+    if (!over && now - ruleAt > 25000) { ruleIdx = (ruleIdx + 1 + rnd(NINJA_RULES.length - 1)) % NINJA_RULES.length; ruleAt = now; setRule(); objs.forEach((o) => { if (!o.dead && !o.bomb && o.vy > 0) o.dead = true; }); }
+    if (!over && now - lastSpawn > Math.max(450, 1300 - elapsed * 12)) { spawn(now); if (elapsed > 20 && Math.random() < 0.35) spawn(now); lastSpawn = now; }
+    g.clearRect(0, 0, W, H);
+    for (const o of objs) {
+      o.x += o.vx; o.y += o.vy; o.vy += 0.22;
+      if (!o.dead && o.vy > 0 && o.y > H + 40) { o.dead = true; if (!over && !o.bomb && rule().f(o.n)) loseLife(`missed ${o.n}`, o.x, H - 20); }
+      if (o.dead) continue;
+      g.save(); g.translate(o.x, o.y);
+      if (o.bomb) { g.font = '46px serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('💣', 0, 2); }
+      else {
+        const grd = g.createRadialGradient(-8, -10, 4, 0, 0, o.r); grd.addColorStop(0, `hsl(${o.hue} 90% 72%)`); grd.addColorStop(1, `hsl(${o.hue} 70% 45%)`);
+        g.fillStyle = grd; g.beginPath(); g.arc(0, 0, o.r, 0, Math.PI * 2); g.fill();
+        g.fillStyle = '#fff'; g.font = '800 22px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.shadowColor = 'rgba(0,0,0,.5)'; g.shadowBlur = 4; g.fillText(o.n, 0, 1);
+      }
+      g.restore();
+    }
+    objs = objs.filter((o) => !o.dead || false);
+    for (const b of bits) {
+      b.x += b.vx; b.y += b.vy; b.vy += 0.3; b.a -= 0.02;
+      g.save(); g.globalAlpha = Math.max(0, b.a); g.translate(b.x, b.y); g.rotate(b.side * (1 - b.a));
+      g.fillStyle = `hsl(${b.hue} 80% 55%)`; g.beginPath(); g.arc(0, 0, 28, b.side < 0 ? Math.PI / 2 : -Math.PI / 2, b.side < 0 ? Math.PI * 1.5 : Math.PI / 2); g.fill(); g.restore();
+    }
+    bits = bits.filter((b) => b.a > 0 && b.y < H + 60);
+    trail = trail.filter((p) => now - p[2] < 140);
+    if (trail.length > 1) { g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 5; g.lineCap = 'round'; g.lineJoin = 'round'; g.shadowColor = '#7dd3fc'; g.shadowBlur = 12; g.beginPath(); trail.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke(); g.shadowBlur = 0; }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+  body._test = { objs: () => objs, rule: () => rule(), slice: (o) => sliceAt(o) };
+}
+
+// ------------------------------------------------------------------ Meteor Defense
+function meteorQ(wave) {
+  const t = rnd(Math.min(6, wave + 1));
+  let a; let b;
+  if (t === 0) { a = between(2, 20); b = between(2, 20); return [`${a} + ${b}`, a + b]; }
+  if (t === 1) { a = between(10, 40); b = between(1, a); return [`${a} − ${b}`, a - b]; }
+  if (t === 2) { a = between(2, 12); b = between(2, 12); return [`${a} × ${b}`, a * b]; }
+  if (t === 3) { b = between(2, 12); a = between(2, 12); return [`${a * b} ÷ ${b}`, a]; }
+  if (t === 4) { a = between(2, 15); return [`${a}²`, a * a]; }
+  if (t === 5) { a = pick([10, 20, 25, 50]); b = pick([20, 40, 60, 80, 120, 200]); return [`${a}% of ${b}`, (a * b) / 100]; }
+  a = between(2, 9); b = between(2, 4); return [`${a}^${b}`, a ** b];
+}
+function meteor(ctx) {
+  const body = el(`<div class="meteor"><div class="gb-top"><span class="gb-score">0</span><span class="mt-wave">Wave 1</span><span class="mt-shields">🛡️🛡️🛡️</span></div>
+    <div class="nj-wrap"><canvas class="mt-canvas"></canvas><div class="nj-flash"></div></div><div class="mt-pad"></div>
+    <p class="small">Tap the answer to fire at the meteor. Don’t let them reach the ground!</p></div>`);
+  ctx.openSheet('Meteor Defense', body, 'tall', stopper(() => { over = true; }));
+  const { c, g, W, H } = makeCanvas(body, '.mt-canvas', 0.5);
+  const stars = Array.from({ length: 60 }, () => [Math.random() * W, Math.random() * H, Math.random() * 1.5 + 0.3]);
+  let mets = []; let lasers = []; let booms = []; let score = 0; let shields = 3; let wave = 1; let kills = 0; let over = false; let last = 0; let jam = 0; let shake = 0;
+  const pad = body.querySelector('.mt-pad');
+  const flash = (color) => { const f = body.querySelector('.nj-flash'); f.style.background = color; f.animate([{ opacity: 0.4 }, { opacity: 0 }], { duration: 350 }); };
+  const drawPad = () => {
+    const answers = [...new Set(mets.filter((m) => !m.dead).map((m) => m.ans))];
+    while (answers.length < 4) { const base = answers.length ? pick(answers) : between(5, 40); const d = Math.max(1, base + pick([-2, -1, 1, 2, 10, -10])); if (!answers.includes(d)) answers.push(d); }
+    const cur = [...pad.querySelectorAll('.mt-btn')].map((b) => +b.dataset.a);
+    if (cur.length === answers.length && answers.every((a) => cur.includes(a))) return;
+    pad.innerHTML = shuffle(answers.slice(0, 6)).map((a) => `<button class="mt-btn" data-a="${a}">${a}</button>`).join('');
+  };
+  const spawn = () => {
+    const [q, ans] = meteorQ(wave);
+    if (mets.some((m) => !m.dead && m.ans === ans)) return;
+    mets.push({ x: 40 + Math.random() * (W - 80), y: -30, v: 0.35 + wave * 0.09 + Math.random() * 0.2, q, ans, r: 30, rot: Math.random() * 6, dead: false });
+    drawPad();
+  };
+  pad.addEventListener('click', (e) => {
+    const b = e.target.closest('.mt-btn'); if (!b || over || jam > performance.now()) return;
+    const a = +b.dataset.a;
+    const target = mets.filter((m) => !m.dead && m.ans === a).sort((x, y) => y.y - x.y)[0];
+    if (!target) { jam = performance.now() + 900; pad.classList.add('jam'); setTimeout(() => pad.classList.remove('jam'), 900); ctx.sound('wrong'); const [x, y] = centerOf(b); popText(x, y - 20, 'Miss! Cannon jammed', '#f87171'); return; }
+    target.dead = true; kills++;
+    const pts = 10 * wave + Math.round((1 - target.y / H) * 20); score += pts;
+    lasers.push({ x: target.x, y: target.y, t: performance.now() });
+    booms.push({ x: target.x, y: target.y, t: performance.now() });
+    const cb = c.getBoundingClientRect(); burst(cb.left + target.x, cb.top + target.y, { color: ['#fb923c', '#facc15', '#f87171'], n: 18, spread: 70 }); popText(cb.left + target.x, cb.top + target.y - 20, `+${pts}`);
+    ctx.sound('correct');
+    body.querySelector('.gb-score').textContent = score;
+    if (kills % 8 === 0) { wave++; body.querySelector('.mt-wave').textContent = `Wave ${wave}`; ctx.toast(`Wave ${wave}!`); ctx.sound('crit'); }
+    drawPad();
+  });
+  const end = () => {
+    if (over) return; over = true;
+    setTimeout(() => done(ctx, body, 'meteor', score, Math.min(120, Math.round(score / 15)), { title: 'Planet lost', big: score, unit: 'points', line: `Wave ${wave} · ${kills} meteors`, again: () => ctx.startGame('meteor'), share: `I defended the planet to wave ${wave} (${score} pts) in Meteor Defense on MathScroll!` }), 800);
+  };
+  const frame = (now) => {
+    if (!body.isConnected || (over && now - last > 1500)) return;
+    if (!over && now - last > Math.max(1100, 3200 - wave * 280) && mets.filter((m) => !m.dead).length < 3 + Math.floor(wave / 2)) { spawn(); last = now; }
+    g.save();
+    if (shake > 0) { g.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake); shake *= 0.9; if (shake < 0.5) shake = 0; }
+    const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#0b1026'); sky.addColorStop(1, '#2a1846'); g.fillStyle = sky; g.fillRect(-10, -10, W + 20, H + 20);
+    g.fillStyle = '#fff'; for (const [x, y, r] of stars) { g.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(now / 900 + x)); g.fillRect(x, y, r, r); } g.globalAlpha = 1;
+    g.fillStyle = '#1f6f4a'; g.beginPath(); g.ellipse(W / 2, H + 40, W * 0.8, 70, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#94a3b8'; g.fillRect(W / 2 - 10, H - 26, 20, 26); g.beginPath(); g.arc(W / 2, H - 26, 14, Math.PI, 0); g.fill();
+    for (const m of mets) {
+      if (m.dead) continue;
+      m.y += m.v; m.rot += 0.01;
+      if (m.y > H - 30) { m.dead = true; shields--; shake = 14; flash('#ef4444'); ctx.sound('wrong'); booms.push({ x: m.x, y: H - 30, t: now, big: true }); body.querySelector('.mt-shields').textContent = '🛡️'.repeat(Math.max(0, shields)) + '💥'.repeat(Math.max(0, 3 - shields)); drawPad(); if (shields <= 0) end(); continue; }
+      g.save(); g.translate(m.x, m.y);
+      g.strokeStyle = 'rgba(251,146,60,.35)'; g.lineWidth = 10; g.beginPath(); g.moveTo(0, -m.r); g.lineTo(-6, -m.r - 40); g.stroke();
+      g.rotate(m.rot); const grd = g.createRadialGradient(-8, -8, 4, 0, 0, m.r); grd.addColorStop(0, '#a8a29e'); grd.addColorStop(1, '#57534e'); g.fillStyle = grd;
+      g.beginPath(); for (let k = 0; k < 9; k++) { const a = (k / 9) * Math.PI * 2; const rr = m.r * (0.85 + 0.15 * Math.sin(k * 2.3)); g.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } g.closePath(); g.fill();
+      g.rotate(-m.rot); g.fillStyle = '#fff'; g.font = `800 ${m.q.length > 7 ? 13 : 16}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.shadowColor = '#000'; g.shadowBlur = 4; g.fillText(m.q, 0, 1);
+      g.restore();
+    }
+    mets = mets.filter((m) => !m.dead);
+    lasers = lasers.filter((l) => now - l.t < 180);
+    for (const l of lasers) { g.strokeStyle = '#67e8f9'; g.lineWidth = 4; g.shadowColor = '#22d3ee'; g.shadowBlur = 14; g.beginPath(); g.moveTo(W / 2, H - 30); g.lineTo(l.x, l.y); g.stroke(); g.shadowBlur = 0; }
+    booms = booms.filter((b) => now - b.t < 400);
+    for (const b of booms) { const k = (now - b.t) / 400; g.fillStyle = `rgba(251,146,60,${1 - k})`; g.beginPath(); g.arc(b.x, b.y, (b.big ? 60 : 36) * k + 6, 0, Math.PI * 2); g.fill(); }
+    g.restore();
+    requestAnimationFrame(frame);
+  };
+  drawPad();
+  requestAnimationFrame(frame);
+  body._test = { mets: () => mets };
+}
+
 // ------------------------------------------------------------------ catalogue
 export const GAMES2 = [
-  { id: 'g2048', name: '2048', icon: '🔢', blurb: 'Swipe to merge powers of two.', cost: '1⚡ per game', cat: 'arcade', play: g2048 },
-  { id: 'sudoku', name: 'Sudoku', icon: '9️⃣', blurb: 'The classic, in three difficulties.', cost: '1⚡ per puzzle', cat: 'puzzle', play: (c) => sudoku(c) },
-  { id: 'mines', name: 'Minesweeper', icon: '💣', blurb: 'Logic and numbers. First tap is always safe.', cost: '1⚡ per game', cat: 'puzzle', play: mines },
-  { id: 'lights', name: 'Lights Out', icon: '💡', blurb: 'Turn off every light. Levels get harder.', cost: '1⚡ per run', cat: 'puzzle', play: (c) => lights(c) },
-  { id: 'hanoi', name: 'Tower of Hanoi', icon: '🗼', blurb: 'Move the tower in 2ⁿ − 1 moves.', cost: '1⚡ per run', cat: 'puzzle', play: (c) => hanoi(c) },
-  { id: 'fifteen', name: '15-Puzzle', icon: '🧊', blurb: 'Slide the tiles back into order.', cost: '1⚡ per puzzle', cat: 'puzzle', play: (c) => fifteen(c) },
-  { id: 'mastermind', name: 'Code Breaker', icon: '🔐', blurb: 'Crack a 4-digit code with logic.', cost: '1⚡ per code', cat: 'puzzle', play: mastermind },
-  { id: 'nim', name: 'Nim', icon: '🪨', blurb: 'Beat the computer — the secret is binary.', cost: '1⚡ per run', cat: 'puzzle', play: (c) => nim(c) },
-  { id: 'magic', name: 'Magic Square', icon: '✨', blurb: 'Make every line add to the same total.', cost: '1⚡ per square', cat: 'puzzle', play: (c) => magic(c) },
-  { id: 'memory', name: 'Memory Match', icon: '🃏', blurb: 'Pair up equal values: ½ and 0.5, 2⁵ and 32.', cost: 'Free — it’s maths', cat: 'speed', play: memory },
-  ...QUICKFIRE.map((q) => ({ id: q.id, name: q.title, icon: q.icon, blurb: q.blurb, cost: 'Free — it’s maths', cat: 'speed', play: (c) => quickfire(c, { id: q.id, title: q.title, gen: GEN[q.gen] }) })),
+  { id: 'ninja', name: 'Number Ninja', icon: '🥷', blurb: 'Slice the numbers that fit the rule — primes, squares, multiples…', cost: '1⚡ per game', cat: 'action', play: ninja,
+    how: ['Swipe across numbers that fit the rule at the top.', 'Slice a wrong number or let a right one fall: lose a heart.', 'Slice several in one swipe for a combo. Avoid 💣.', 'The rule changes every 25 seconds!'] },
+  { id: 'meteor', name: 'Meteor Defense', icon: '☄️', blurb: 'Blast falling meteors by tapping their answers.', cost: '1⚡ per game', cat: 'action', play: meteor,
+    how: ['Each meteor carries a sum.', 'Tap its answer at the bottom to fire your laser.', 'A wrong answer jams the cannon for a second.', 'Three meteors reach the ground and it’s over. Waves get faster.'] },
+  { id: 'blitz', name: 'Math Blitz', icon: '⚡', blurb: '60 seconds of mixed speed maths. Build combos, hit fever.', cost: 'Free — it’s maths', cat: 'action', play: blitz,
+    how: ['Answer as many as you can in 60 seconds.', 'Correct answers in a row raise your multiplier (up to ×5).', '12 in a row starts 🔥 fever: double points.', 'Every 8 in a row earns a ❄️ freeze that stops the clock for 5 s. Wrong answers cost 3 s.'] },
+  { id: 'g2048', name: '2048', icon: '🔢', blurb: 'Swipe to merge powers of two.', cost: '1⚡ per game', cat: 'puzzle', play: g2048, how: ['Swipe to slide every tile.', 'Two equal tiles merge into their sum.', 'Reach 2048 — then keep going.'] },
+  { id: 'sudoku', name: 'Sudoku', icon: '9️⃣', blurb: 'The classic number puzzle, in three difficulties.', cost: '1⚡ per puzzle', cat: 'puzzle', play: (c) => sudoku(c), how: ['Fill the grid so every row, column and 3×3 box has 1–9 once.', 'Tap a square, then a number.', 'Clashes turn red.'] },
+  { id: 'mines', name: 'Minesweeper', icon: '💣', blurb: 'Pure logic. First tap is always safe.', cost: '1⚡ per game', cat: 'puzzle', play: mines, how: ['Tap to dig. A number tells you how many of the 8 neighbours are mines.', 'Turn on 🚩 to mark mines.', 'Dig every safe square to win.'] },
+  { id: 'mastermind', name: 'Code Breaker', icon: '🔐', blurb: 'Crack a secret 4-digit code by deduction.', cost: '1⚡ per code', cat: 'brain', play: mastermind, how: ['Guess a 4-digit code (all digits different).', '🎯 = right digit in the right place. ⚪ = right digit, wrong place.', 'Crack it in 10 tries.'] },
+  { id: 'memory', name: 'Memory Match', icon: '🃏', blurb: 'Pair equal values: ½ and 0.5, 2⁵ and 32.', cost: 'Free — it’s maths', cat: 'brain', play: memory, how: ['Flip two cards at a time.', 'Match cards with equal values, like ¼ and 25%.', 'Fewer moves = more points.'] },
+  { id: 'nim', name: 'Nim', icon: '🪨', blurb: 'Outsmart the computer. The secret is binary.', cost: '1⚡ per run', cat: 'strategy', play: (c) => nim(c), how: ['Take any number of stones from one row.', 'Whoever takes the last stone wins.', 'There’s a perfect strategy — can you find it?'] },
 ];
 export const PAID2 = new Set(GAMES2.filter((g) => g.cost.includes('⚡')).map((g) => g.id));
 export function play2(id, ctx) { texFn = ctx.tex || texFn; GAMES2.find((g) => g.id === id).play(ctx); }
 // One quick-fire question, for feed cards.
 export function quickQuestion(ctx, kind) { texFn = ctx.tex || texFn; return GEN[kind](1 + rnd(2)); }
-export const QUICK_KINDS = Object.keys(GEN);
+export const QUICK_KINDS = Object.keys(GEN).filter((k) => k !== 'arith');

@@ -30,18 +30,18 @@ Why the mirrors? AoPS puts every automated request through a bot check, and Proo
 - **Rewards**: lucky "critical" solves (2× XP), a chest every 5 solves and every level-up (XP, streak freezes, avatar frames, jackpots), "on fire" mode at 5 in a row, sound effects, and an always-visible XP bar.
 - **Leagues**: Bronze → Silver → Gold → Platinum → Diamond → Master by weekly XP.
 - **🎓 Learn**: **Foundations** courses (7 MATH subjects, levels 1–5) and **Olympiad** courses (number theory, combinatorics, algebra, geometry, mixed; Omni-MATH, warm-up to IMO). Each unit has:
-  - a 📚 **lecture**: tap-through slides with key ideas, a concept spotlight from Wikipedia, a real worked example revealed step by step, and a "your turn" problem;
+  - a 📚 **lecture** written for that unit: a hook, three explained ideas, a worked example revealed step by step, a quick check question with an explanation, a Wikipedia "go deeper" page, a real competition problem, and flip-card recap (the 📖 guidebook keeps the notes);
   - four lessons with hearts and **confidence bets** (🤷 guess / 🙂 think so / 🔒 sure: sure pays bonus XP but costs two hearts if wrong; your calibration is shown at the end);
   - a 🎁 chest, a 🏆 unit test, and a 👹 **boss problem** one level harder, with a hint ladder that lowers the reward;
   - a 🧠 **memory meter** that fades like real memory (one-week half-life, doubling with each review) and asks you to refresh;
   - a 📖 guidebook and a 👑 legendary no-mistakes challenge, plus a 🔁 mistakes review.
 - **Answers you can type**: besides whole numbers and multiple choice, problems with answers like 3/4, 2√3 or π/6 are checked by value. You can type `3/4`, `2sqrt(3)` or `pi/6`.
-- **26 mini-games** (🎮 Games tab), grouped as Puzzles, Arcade, Classics and Speed maths, with a daily **game of the day** for 2× XP:
-  - **Puzzles:** Sudoku, Minesweeper, Lights Out, Tower of Hanoi, 15-Puzzle, Code Breaker, Nim, Magic Square.
-  - **Arcade:** Block Blast, 2048, Sum Blast.
-  - **Classics:** Chess Puzzles (Lichess, rated), Queens.
-  - **Speed maths:** 24, Mental Math Rush, Memory Match, and ten 60-second quick-fire rounds (Prime or Not, Which Is Bigger?, Next in Line, Solve for x, Estimation Station, Binary Bits, Angle Eye, Last Digit, Divisor Count, Clock Maths).
-  - Puzzle and arcade games cost ⚡ (earned by solving problems). Speed-maths games are free.
+- **12 mini-games** (🎮 Games tab), each a different kind of game, with first-play tutorials, particle effects and a daily **game of the day** (2× XP):
+  - **Action:** *Number Ninja* (swipe to slice numbers that fit the rule: primes, squares, multiples…), *Meteor Defense* (tap answers to laser falling meteors, in waves), *Math Blitz* (60 s of mixed speed maths with combo multipliers, fever mode and time freezes).
+  - **Puzzle:** Block Blast, 2048, Sudoku, Minesweeper.
+  - **Brain teasers:** 24, Code Breaker, Memory Match.
+  - **Strategy:** Chess Puzzles (Lichess, rated), Nim.
+  - Games cost ⚡ (earned by solving problems), except Math Blitz, 24 and Memory Match.
 - **Feed**: odd or broken cards are skipped (problems that refer to a missing figure, garbled or near-empty text, stub articles) while every source stays in. Every 8 cards the For you feed drops in a ⚡ lightning round, a Quick 24, a "continue your course" card or the game of the day.
 - **⚡ Charges**: every correct answer — feed, Learn or in-game — earns 1 ⚡. When you're out, the game hands you a problem to solve. Set how hard those problems are in Games → change (Easy, Medium, Hard, Expert).
 - **Duels**: play 5 AMC/AIME problems, send a friend a link with the same five, see who wins (no account needed).
