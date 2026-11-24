@@ -1,0 +1,19 @@
+{
+  "name": "mathscroll",
+  "version": "1.0.0",
+  "description": "An endless, swipeable feed of maths problems, theorems, concepts and sequences.",
+  "scripts": {
+    "start": "npx http-server www -p 8080 -c-1",
+    "sync": "npx cap sync ios",
+    "open:ios": "npx cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/ios": "^8.6.2",
+    "@capacitor/status-bar": "^8.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.2"
+  },
+  "private": true
+}

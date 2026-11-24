@@ -1,0 +1,15 @@
+{
+  "appId": "com.mathscroll.app",
+  "appName": "MathScroll",
+  "webDir": "www",
+  "backgroundColor": "#0d0e12",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#0d0e12",
+    "limitsNavigationsToAppBoundDomains": false
+  },
+  "plugins": {
+    "CapacitorHttp": { "enabled": true },
+    "StatusBar": { "style": "DARK" }
+  }
+}
