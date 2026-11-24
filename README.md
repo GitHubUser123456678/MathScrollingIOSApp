@@ -27,6 +27,10 @@ Why the mirrors? AoPS puts every automated request through a bot check, and Proo
 - **Hints** (the first step of the solution) and full solutions/proofs that slide up.
 - **Focus problems**: every few problems the feed pauses for 10 seconds (or until you answer) so you really try it, with a few skips a day. Hints, answers, solutions and source links unlock after the think time, and flicking past several problems in a row triggers a focus problem. Think time is tracked in your profile. All adjustable in Settings.
 - **XP & levels**: every solve earns XP (more for harder problems, ×1.5–×2.5 combos for answer streaks), plus a daily sign-in bonus; level-ups with titles from Novice to Legend.
+- **Rewards**: lucky "critical" solves (2× XP), a chest every 5 solves and every level-up (XP, streak freezes, avatar frames, jackpots), "on fire" mode at 5 in a row, sound effects, and an always-visible XP bar.
+- **Leagues**: Bronze → Silver → Gold → Platinum → Diamond → Master by weekly XP.
+- **Duels**: play 5 AMC/AIME problems, send a friend a link with the same five, see who wins (no account needed).
+- **Avatar frames** to collect and equip; a session recap every 30 minutes.
 - **Daily quests**: three a day (the same for everyone); finishing all three gives bonus XP and a streak freeze that protects your day streak.
 - **Progress hub** (the level ring, top left): level, quests, streaks, daily challenge results and leaderboards.
 - **Daily challenge**: the same AMC/AIME problem for everyone each day, with a daily streak and a share-your-result button.

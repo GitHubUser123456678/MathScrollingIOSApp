@@ -526,6 +526,14 @@ export async function dailyChallenge(dateStr) {
   throw new Error('no answerable problem');
 }
 
+// A specific NuminaMath problem by its row number (used by duels so both players get the same problems).
+export async function numinaByIndex(idx) {
+  const data = await getJSON(`${HF}/rows?dataset=${encodeURIComponent(NUMINA)}&config=default&split=train&offset=${Number(idx)}&length=1`);
+  const r = data.rows?.[0];
+  if (!r) throw new Error('problem not found');
+  return numinaCard(r.row, r.row_idx, NUMINA_CFG[r.row.source] || NUMINA_CFG.amc_aime);
+}
+
 const amcAime = numinaSource('amc_aime');
 const aopsForum = numinaSource('aops_forum');
 const olympiad = numinaSource('olympiads');

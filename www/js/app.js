@@ -1,4 +1,4 @@
-import { SOURCES, PROBLEM_TOPICS, escapeHTML, textToHtml, answerFor, searchAll, dailyChallenge, DEFAULT_FILTERS, difficultyToRating, difficultyWindow, WIKI_GROUP_NAMES } from './sources.js';
+import { SOURCES, PROBLEM_TOPICS, escapeHTML, textToHtml, answerFor, searchAll, dailyChallenge, DEFAULT_FILTERS, difficultyToRating, difficultyWindow, WIKI_GROUP_NAMES, numinaByIndex } from './sources.js';
 import { renderContent } from './render.js';
 import * as cloud from './cloud.js';
 
@@ -29,6 +29,7 @@ const DEFAULT_SETTINGS = {
   theme: 'system',
   daily: true,
   focus: { on: true, every: 4, seconds: 10, gate: true, skips: 3 },
+  sound: true,
 };
 
 const savedSettings = store.get('settings', {});
@@ -49,6 +50,7 @@ const state = {
   generation: 0,
   pins: [], // cards shown first: a post opened from a link, today's daily challenge
   badges: store.get('badges', {}),
+  cosmetics: { owned: [], frame: null, ...store.get('cosmetics', {}) },
 };
 state.settings.sources = { ...DEFAULT_SETTINGS.sources, ...state.settings.sources };
 state.settings.weights = { ...DEFAULT_SETTINGS.weights, ...state.settings.weights };
@@ -131,6 +133,8 @@ const BADGES = [
   { id: 'seq1', name: 'Pattern spotter', desc: 'Guess the next term of a sequence', test: () => (state.stats.seqRight || 0) >= 1 },
   { id: 'post1', name: 'Author', desc: 'Write a post', test: () => state.posts.length >= 1 },
   { id: 'save10', name: 'Collector', desc: 'Save 10 cards', test: () => state.saved.length >= 10 },
+  { id: 'duel1', name: 'Duelist', desc: 'Win a duel', test: () => (state.stats.duelsWon || 0) >= 1 },
+  { id: 'level10', name: 'Double digits', desc: 'Reach level 10', test: () => levelFor(state.stats.xp || 0) >= 10 },
   { id: 'focus10', name: 'Deep thinker', desc: 'Finish 10 focus problems', test: () => (state.stats.focusDone || 0) >= 10 },
   { id: 'think30', name: 'Patient mind', desc: 'Spend 30 minutes thinking on problems', test: () => (state.stats.thinkTotal || 0) >= 1800 },
 ];
@@ -158,14 +162,23 @@ function gainXp(amount, anchor = null) {
   const st = state.stats;
   const before = levelFor(st.xp || 0);
   st.xp = (st.xp || 0) + amount;
+  rollWeek();
   const wk = cloud.weekStart();
   if (st.weekOf !== wk) { st.weekOf = wk; st.weekXp = 0; }
+  const leagueBefore = leagueFor(st.weekXp || 0)[0];
   st.weekXp = (st.weekXp || 0) + amount;
+  session.xp += amount;
+  const leagueAfter = leagueFor(st.weekXp)[0];
+  if (leagueAfter !== leagueBefore) setTimeout(() => { toast(`Promoted to ${leagueAfter} league!`); sound('level'); }, 1600);
   saveStats();
   renderLevel();
   if (anchor) floatXp(anchor, amount);
   const after = levelFor(st.xp);
-  if (after > before) setTimeout(() => celebrateLevel(after), 700);
+  if (after > before) {
+    st.chests = (st.chests || 0) + 1; // every level-up comes with a chest
+    saveStats();
+    setTimeout(() => celebrateLevel(after), 700);
+  }
   if (cloud.currentUser()) { pendingXp += amount; clearTimeout(xpTimer); xpTimer = setTimeout(flushXp, 2500); }
 }
 async function flushXp() {
@@ -190,10 +203,18 @@ function renderLevel() {
   btn.setAttribute('aria-label', `Level ${L}, ${Math.round(frac * 100)}% to level ${L + 1}. Open your progress.`);
   const open = questsFor(today()).filter((q) => !(dayRec().questsDone || []).includes(q.id)).length;
   btn.classList.toggle('has-quests', open > 0);
+  const bar = $('#xpbar');
+  if (bar) {
+    bar.querySelector('.fill').style.width = `${Math.max(2, frac * 100)}%`;
+    const cp = state.stats.chestProgress || 0;
+    bar.querySelector('.pips').innerHTML = Array.from({ length: CHEST_EVERY }, (_, i) => `<i class="${i < cp ? 'on' : ''}"></i>`).join('');
+  }
+  const cb = $('#chestBtn');
+  if (cb) { const n = state.stats.chests || 0; cb.hidden = n <= 0; cb.querySelector('b').textContent = n > 1 ? n : ''; }
 }
 function celebrateLevel(L) {
   const glyphs = ['∑', 'π', '∞', '√', '∫', 'φ', '★', 'e', 'Δ', 'θ'];
-  const ov = h(`<div class="levelup" role="dialog" aria-label="Level up"><div class="lu-card"><small>Level up!</small><div class="lu-num">${L}</div><b>${titleFor(L)}</b><p>${xpForLevel(L + 1) - (state.stats.xp || 0)} XP to level ${L + 1}</p></div></div>`);
+  const ov = h(`<div class="levelup" role="dialog" aria-label="Level up"><div class="lu-card"><small>Level up!</small><div class="lu-num">${L}</div><b>${titleFor(L)}</b><p>${xpForLevel(L + 1) - (state.stats.xp || 0)} XP to level ${L + 1}</p><span class="lu-chest">🎁 +1 chest</span></div></div>`);
   for (let i = 0; i < 28; i++) {
     const g = document.createElement('span');
     g.className = 'confetti'; g.textContent = glyphs[i % glyphs.length];
@@ -205,6 +226,8 @@ function celebrateLevel(L) {
   ov.addEventListener('click', close);
   setTimeout(close, 3200);
   document.body.appendChild(ov);
+  sound('level');
+  unlockLevelCosmetics(L);
   checkBadges();
 }
 // XP for a correct answer: harder problems and answer combos are worth more.
@@ -231,14 +254,19 @@ const QUEST_POOL = [
 function questsFor(date) {
   let seed = 0;
   for (const ch of `quests-${date}`) seed = (seed * 33 + ch.charCodeAt(0)) >>> 0;
-  const pool = QUEST_POOL.filter((q) => (q.id !== 'daily' || state.settings.daily) && (q.ev !== 'focus' || state.settings.focus.on));
+  const src = state.settings.sources;
+  const pool = QUEST_POOL.filter((q) => (q.id !== 'daily' || state.settings.daily) && (q.ev !== 'focus' || state.settings.focus.on) && (q.ev !== 'proof' || src.proofwiki) && (q.ev !== 'seq' || src.oeis));
+  // Seeded shuffle, then the first three with different kinds of goal (always finishes).
+  const order = [...pool];
+  for (let i = order.length - 1; i > 0; i--) {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    const j = (seed >>> 8) % (i + 1);
+    [order[i], order[j]] = [order[j], order[i]];
+  }
   const picked = [];
-  const used = new Set();
-  while (picked.length < 3 && used.size < pool.length) {
-    seed = (seed * 1103515245 + 12345) >>> 0;
-    const q = pool[seed % pool.length];
-    if (used.has(q.id) || picked.some((p) => p.ev === q.ev)) { used.add(q.id); continue; }
-    used.add(q.id); picked.push(q);
+  for (const q of order) {
+    if (picked.length === 3) break;
+    if (!picked.some((p) => p.ev === q.ev)) picked.push(q);
   }
   return picked;
 }
@@ -254,7 +282,7 @@ function questEvent(ev, amount = 1, atLeast = null) {
     d.quests[q.id] = now; changed = true;
     if (now >= q.goal) {
       d.questsDone.push(q.id);
-      setTimeout(() => { toast(`Quest complete: ${q.text} · +${q.xp} XP`); gainXp(q.xp); }, 1200);
+      setTimeout(() => { toast(`Quest complete: ${q.text} · +${q.xp} XP`); gainXp(q.xp); sound('quest'); }, 1200);
       if (d.questsDone.length === 3 && !d.allQuests) {
         d.allQuests = true;
         state.stats.freezes = Math.min(2, (state.stats.freezes || 0) + 1);
@@ -273,6 +301,131 @@ function applyStreakFreeze() {
   state.stats.freezes--;
   saveStats();
   setTimeout(() => toast(`Streak freeze used — your ${dayStreak()}-day streak is safe`), 1500);
+}
+
+// ------------------------------------------------------------------ rewards: sounds, chests, cosmetics, leagues
+let audioCtx = null;
+function sound(kind) {
+  if (!state.settings.sound) return;
+  try {
+    audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const tunes = {
+      correct: [[660, 0], [990, 0.09]], wrong: [[247, 0], [196, 0.11]], crit: [[784, 0], [1175, 0.06], [1568, 0.12], [2093, 0.18]],
+      level: [[523, 0], [659, 0.1], [784, 0.2], [1047, 0.32]], chest: [[880, 0], [1175, 0.07], [1568, 0.14]], quest: [[740, 0], [1109, 0.1]],
+    };
+    const t0 = audioCtx.currentTime;
+    for (const [f, dt] of tunes[kind] || []) {
+      const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+      o.type = kind === 'wrong' ? 'triangle' : 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + dt);
+      g.gain.exponentialRampToValueAtTime(kind === 'wrong' ? 0.12 : 0.16, t0 + dt + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.24);
+      o.connect(g); g.connect(audioCtx.destination); o.start(t0 + dt); o.stop(t0 + dt + 0.26);
+    }
+  } catch { /* no audio */ }
+}
+
+const COSMETICS = [
+  { id: 'mint', name: 'Mint', bg: 'linear-gradient(135deg,#34d399,#a7f3d0)' },
+  { id: 'ocean', name: 'Ocean', bg: 'linear-gradient(135deg,#38bdf8,#1e3a8a)' },
+  { id: 'ember', name: 'Ember', bg: 'linear-gradient(135deg,#facc15,#f97316,#ef4444)' },
+  { id: 'rose', name: 'Rose', bg: 'linear-gradient(135deg,#fda4af,#e11d48)' },
+  { id: 'mono', name: 'Graphite', bg: 'linear-gradient(135deg,#f5f5f5,#404040)' },
+  { id: 'neon', name: 'Neon', bg: 'linear-gradient(135deg,#a3e635,#22d3ee)' },
+  { id: 'gold', name: 'Gold', bg: 'linear-gradient(135deg,#b7791f,#fde68a,#f5b942,#b7791f)', level: 5 },
+  { id: 'aurora', name: 'Aurora', bg: 'linear-gradient(135deg,#22d3ee,#a78bfa,#f472b6)', level: 10 },
+  { id: 'galaxy', name: 'Galaxy', bg: 'linear-gradient(135deg,#1e1b4b,#7c3aed,#ec4899,#1e1b4b)', level: 15 },
+  { id: 'prism', name: 'Prism', bg: 'conic-gradient(#ef4444,#f59e0b,#eab308,#22c55e,#3b82f6,#8b5cf6,#ef4444)', level: 20 },
+  { id: 'sigma', name: 'Sigma', bg: 'conic-gradient(from 45deg,#f5b942,#0d0e12,#f5b942,#0d0e12,#f5b942)', rare: true },
+];
+const saveCosmetics = () => store.set('cosmetics', state.cosmetics);
+function own(id) {
+  if (state.cosmetics.owned.includes(id)) return false;
+  state.cosmetics.owned.push(id);
+  if (!state.cosmetics.frame) state.cosmetics.frame = id;
+  saveCosmetics();
+  return true;
+}
+function unlockLevelCosmetics(L) {
+  for (const c of COSMETICS) if (c.level && L >= c.level && own(c.id)) setTimeout(() => toast(`New avatar frame unlocked: ${c.name}`), 3600);
+}
+const frameBg = () => COSMETICS.find((c) => c.id === state.cosmetics.frame)?.bg || null;
+
+const CHEST_EVERY = 5;
+function chestProgress() {
+  const st = state.stats;
+  st.chestProgress = (st.chestProgress || 0) + 1;
+  if (st.chestProgress >= CHEST_EVERY) {
+    st.chestProgress = 0;
+    st.chests = (st.chests || 0) + 1;
+    setTimeout(() => { toast('Chest earned! Tap 🎁 to open it'); sound('chest'); }, 900);
+  }
+  saveStats(); renderLevel();
+}
+// Open a chest: mostly XP, sometimes a streak freeze, a new avatar frame, or a jackpot.
+function openChest() {
+  const st = state.stats;
+  if (!(st.chests > 0)) return;
+  st.chests--; saveStats(); renderLevel();
+  const r = Math.random();
+  const lockedFrames = COSMETICS.filter((c) => !c.level && !state.cosmetics.owned.includes(c.id) && (!c.rare || r > 0.97));
+  let reward;
+  if (r > 0.95) reward = { kind: 'xp', amount: 300, label: 'Jackpot!' };
+  else if (r > 0.80 && lockedFrames.length) { const c = lockedFrames[Math.floor(Math.random() * lockedFrames.length)]; reward = { kind: 'frame', c, label: 'New avatar frame' }; }
+  else if (r > 0.68 && (st.freezes || 0) < 2) reward = { kind: 'freeze', label: 'Streak freeze' };
+  else if (r > 0.50) reward = { kind: 'xp', amount: 80 + Math.floor(Math.random() * 71), label: 'Big XP' };
+  else reward = { kind: 'xp', amount: 25 + Math.floor(Math.random() * 36), label: 'XP' };
+  const ov = h(`<div class="chest-open" role="dialog" aria-label="Chest"><div class="chest-box">🎁</div><div class="chest-reward" hidden></div><p class="small">Tap to continue</p></div>`);
+  document.body.appendChild(ov);
+  sound('chest');
+  setTimeout(() => {
+    const box = $('.chest-reward', ov);
+    $('.chest-box', ov).classList.add('opened');
+    if (reward.kind === 'xp') { box.innerHTML = `<small>${reward.label}</small><b>+${reward.amount} XP</b>`; gainXp(reward.amount); }
+    if (reward.kind === 'freeze') { box.innerHTML = '<small>Streak freeze</small><b>❄</b><span>Protects your streak if you miss a day</span>'; st.freezes = (st.freezes || 0) + 1; saveStats(); }
+    if (reward.kind === 'frame') { own(reward.c.id); box.innerHTML = `<small>New avatar frame</small><i class="frame-swatch" style="background:${reward.c.bg}"></i><b>${reward.c.name}</b><span>Equip it in your profile</span>`; }
+    box.hidden = false;
+    sound(reward.amount >= 300 ? 'level' : 'crit');
+  }, 900);
+  ov.addEventListener('click', () => { if (!$('.chest-reward', ov).hidden) { ov.remove(); if (state.stats.chests > 0) setTimeout(() => toast(`${state.stats.chests} more chest${state.stats.chests === 1 ? '' : 's'} to open`), 300); } });
+}
+
+const LEAGUES = [['Bronze', 0, '#cd7f32'], ['Silver', 150, '#cbd5e1'], ['Gold', 400, '#f5b942'], ['Platinum', 800, '#67e8f9'], ['Diamond', 1500, '#a5b4fc'], ['Master', 3000, '#f472b6']];
+const leagueFor = (wxp) => { let l = LEAGUES[0]; for (const x of LEAGUES) if (wxp >= x[1]) l = x; return l; };
+const nextLeague = (wxp) => LEAGUES.find((x) => x[1] > wxp) || null;
+// A new week started: remember how last week went.
+function rollWeek() {
+  const st = state.stats; const wk = cloud.weekStart();
+  if (st.weekOf && st.weekOf !== wk) {
+    if ((st.weekXp || 0) > 0) st.lastWeek = { xp: st.weekXp, league: leagueFor(st.weekXp)[0], shown: false };
+    st.weekOf = wk; st.weekXp = 0; saveStats();
+  }
+  if (st.lastWeek && !st.lastWeek.shown) {
+    st.lastWeek.shown = true; saveStats();
+    setTimeout(() => toast(`Last week: ${st.lastWeek.league} league with ${st.lastWeek.xp} XP. New week — climb again!`), 2500);
+  }
+}
+
+// Session recap after 30 minutes of use.
+const session = { start: Date.now(), active: 0, solved: 0, xp: 0, recapAt: 30 };
+setInterval(() => {
+  if (document.hidden) return;
+  session.active++;
+  if (session.active >= session.recapAt * 60) { session.recapAt += 30; openRecap(); }
+}, 1000);
+function openRecap() {
+  if (!sheet.hidden) return;
+  const L = levelFor(state.stats.xp || 0);
+  const body = document.createElement('div');
+  body.className = 'recap';
+  body.innerHTML = `<div class="recap-big">${Math.round(session.active / 60)} min</div>
+    <div class="stats"><div><b>${session.solved}</b><span>solved</span></div><div><b>+${session.xp}</b><span>XP</span></div><div><b>${L}</b><span>level</span></div><div><b>${dayStreak()}</b><span>day streak</span></div></div>
+    <p>${xpForLevel(L + 1) - (state.stats.xp || 0)} XP to level ${L + 1}. Keep going, or take a break and come back for tomorrow’s quests.</p>
+    <button class="btn wide keep">Keep going</button><button class="btn ghost wide share-s">Share my session</button>`;
+  $('.keep', body).addEventListener('click', closeSheet);
+  $('.share-s', body).addEventListener('click', () => shareText(`I solved ${session.solved} maths problems and earned ${session.xp} XP on MathScroll in ${Math.round(session.active / 60)} minutes!`));
+  openSheet('Session recap', body);
 }
 
 // ------------------------------------------------------------------ account-only features
@@ -995,8 +1148,15 @@ function answerBox(data, cardEl, onAnswered = null) {
       d.solved++;
       engage(data.source, 2);
       const { xp, mult } = solveXp(data, state.stats.streak);
-      gainXp(xp + (d.solved === 1 ? 10 : 0), box);
-      if (mult > 1) setTimeout(() => toast(`${state.stats.streak} in a row — ×${mult} XP combo!`), 400);
+      const crit = Math.random() < 0.12; // a lucky solve now and then
+      const earned = (xp + (d.solved === 1 ? 10 : 0)) * (crit ? 2 : 1);
+      gainXp(earned, box);
+      sound(crit ? 'crit' : 'correct');
+      if (crit) { box.classList.add('crit'); setTimeout(() => toast(`Critical solve! 2× XP (+${earned})`), 300); }
+      else if (mult > 1) setTimeout(() => toast(`${state.stats.streak} in a row — ×${mult} XP combo!`), 400);
+      session.solved++;
+      chestProgress();
+      document.body.classList.toggle('on-fire', state.stats.streak >= 5);
       questEvent('solve');
       questEvent('combo', 0, state.stats.streak);
       if ((data.difficulty ?? 0) > 4.5) questEvent('hard');
@@ -1004,6 +1164,8 @@ function answerBox(data, cardEl, onAnswered = null) {
       state.stats.streak = 0;
       engage(data.source, 1);
       gainXp(2);
+      sound('wrong');
+      document.body.classList.remove('on-fire');
     }
     if (data.daily && !d.dailyDone) {
       d.dailyDone = true;
@@ -1092,7 +1254,7 @@ function updateStreak(pulse) {
   const s = $('#streak');
   if (state.stats.streak >= 2) {
     s.hidden = false;
-    s.innerHTML = `<b>${state.stats.streak}</b> in a row`;
+    s.innerHTML = `${state.stats.streak >= 5 ? '🔥 ' : ''}<b>${state.stats.streak}</b> in a row${state.stats.streak >= 3 ? ` · ×${state.stats.streak >= 10 ? 2.5 : state.stats.streak >= 5 ? 2 : 1.5} XP` : ''}`;
     if (pulse) { s.classList.remove('pulse'); void s.offsetWidth; s.classList.add('pulse'); }
   } else {
     s.hidden = true;
@@ -1251,7 +1413,7 @@ function openCard(data, title) {
 
 // ------------------------------------------------------------------ account sync
 // Signed-in people keep their stats, saves, likes, badges and private posts on the server.
-const SYNC_KEYS = new Set(['saved', 'liked', 'posts', 'stats', 'days', 'badges', 'profile']);
+const SYNC_KEYS = new Set(['saved', 'liked', 'posts', 'stats', 'days', 'badges', 'profile', 'cosmetics']);
 let syncTimer = null;
 let syncing = false;
 function onStoreChange(key) {
@@ -1260,7 +1422,7 @@ function onStoreChange(key) {
   syncTimer = setTimeout(pushSync, 4000);
 }
 function localData() {
-  return { v: 1, saved: state.saved, liked: state.liked, posts: state.posts, stats: state.stats, days: state.days, badges: state.badges, profile: state.profile };
+  return { v: 1, saved: state.saved, liked: state.liked, posts: state.posts, stats: state.stats, days: state.days, badges: state.badges, profile: state.profile, cosmetics: state.cosmetics };
 }
 async function pushSync() {
   if (!cloud.currentUser()) return;
@@ -1295,6 +1457,9 @@ function mergeData(server) {
     store.set('days', state.days);
     for (const [id, date] of Object.entries(server.badges || {})) if (!state.badges[id] || date < state.badges[id]) state.badges[id] = date;
     store.set('badges', state.badges);
+    if (server.cosmetics?.owned) { state.cosmetics.owned = [...new Set([...state.cosmetics.owned, ...server.cosmetics.owned])]; state.cosmetics.frame ||= server.cosmetics.frame; store.set('cosmetics', state.cosmetics); }
+    for (const k of ['chests', 'freezes']) state.stats[k] = Math.max(state.stats[k] || 0, (server.stats || {})[k] || 0);
+    store.set('stats', state.stats);
     if (server.profile?.name && state.profile.name === 'Mathlete') { state.profile.name = server.profile.name; store.set('profile', state.profile); }
   } finally { syncing = false; }
   updateStreak();
@@ -1502,8 +1667,9 @@ function openProfile() {
   const body = document.createElement('div');
   body.className = 'profile';
   const initial = (p.name.trim()[0] || '∑').toUpperCase();
+  const fb = frameBg();
   const head = h(`<div class="profile-head">
-      <div class="avatar">${escapeHTML(initial)}</div>
+      <div class="avatar-wrap${fb ? ' framed' : ''}" style="${fb ? `--frame:${fb}` : ''}"><div class="avatar">${escapeHTML(initial)}</div></div>
       <div class="who">
         <input class="name-input" value="${escapeHTML(p.name)}" maxlength="30" aria-label="Your name">
         <small>Level ${levelFor(state.stats.xp || 0)} · ${titleFor(levelFor(state.stats.xp || 0))} · ${state.stats.xp || 0} XP</small>
@@ -1562,6 +1728,14 @@ function openProfile() {
   const sprintBtn = h(`<button class="btn wide sprint-start">Start a 10-problem sprint${state.stats.sprintBest ? ` · best ${state.stats.sprintBest}/10` : ''}</button>`);
   sprintBtn.addEventListener('click', openSprint);
   body.appendChild(sprintBtn);
+  const owned = state.cosmetics.owned;
+  const coll = h(`<details class="badges collection"><summary><b>Avatar frames</b><span>${owned.length} / ${COSMETICS.length}</span></summary><div class="frame-grid">${
+    COSMETICS.map((c) => `<button class="frame-item ${owned.includes(c.id) ? 'owned' : ''} ${state.cosmetics.frame === c.id ? 'on' : ''}" data-id="${c.id}" ${owned.includes(c.id) ? '' : 'disabled'}><i class="frame-swatch" style="background:${c.bg}"></i><small>${owned.includes(c.id) ? c.name : c.level ? `Level ${c.level}` : c.rare ? 'Rare chest' : 'Chest'}</small></button>`).join('')
+  }</div><p class="small">Get frames from chests (one every ${CHEST_EVERY} solves and every level-up) and by levelling up.</p></details>`);
+  coll.querySelectorAll('.frame-item.owned').forEach((b) => b.addEventListener('click', () => {
+    state.cosmetics.frame = state.cosmetics.frame === b.dataset.id ? null : b.dataset.id; saveCosmetics(); openProfile();
+  }));
+  body.appendChild(coll);
   const earned = BADGES.filter((b) => state.badges[b.id]).length;
   body.appendChild(h(`<details class="badges"><summary><b>Badges</b><span>${earned} / ${BADGES.length}</span></summary><div class="badge-grid">${
     BADGES.map((b) => `<div class="badge ${state.badges[b.id] ? 'earned' : ''}"><span class="medal">${state.badges[b.id] ? '★' : '☆'}</span><b>${escapeHTML(b.name)}</b><small>${escapeHTML(b.desc)}</small></div>`).join('')
@@ -2001,7 +2175,10 @@ function openProgress() {
       <div class="lvl-ring"><svg viewBox="0 0 36 36" class="ring"><circle cx="18" cy="18" r="15"/><circle class="prog" cx="18" cy="18" r="15" style="stroke-dashoffset:${94.25 * (1 - into / need)}"/></svg><b>${L}</b></div>
       <div class="lvl-text"><b>${titleFor(L)}</b><span>${into} / ${need} XP to level ${L + 1}</span><span>${st.weekOf === wk ? st.weekXp || 0 : 0} XP this week · ${xp} total</span></div>
     </div>
-    <div class="streak-row"><span>🔥 <b>${dayStreak()}</b>-day streak</span><span>❄ <b>${st.freezes || 0}</b> streak freeze${st.freezes === 1 ? '' : 's'}</span></div>
+    <div class="streak-row"><span>🔥 <b>${dayStreak()}</b>-day streak</span><span>❄ <b>${st.freezes || 0}</b> streak freeze${st.freezes === 1 ? '' : 's'}</span><span>🎁 <b>${st.chests || 0}</b></span></div>
+    <div class="league" style="--lc:${leagueFor(st.weekOf === wk ? st.weekXp || 0 : 0)[2]}"><b>${leagueFor(st.weekOf === wk ? st.weekXp || 0 : 0)[0]} league</b><span>${(() => { const w = st.weekOf === wk ? st.weekXp || 0 : 0; const nx = nextLeague(w); return nx ? `${nx[1] - w} XP to ${nx[0]} this week` : 'Top league — amazing!'; })()}</span></div>
+    ${st.chests > 0 ? '<button class="btn wide open-chest">🎁 Open a chest</button>' : ''}
+    <button class="btn ghost wide duel-go">⚔ Duel a friend</button>
     <h3>Today’s quests</h3>
     <div class="quests">${quests.map((q) => {
       const done = (d.questsDone || []).includes(q.id);
@@ -2059,8 +2236,91 @@ function openProgress() {
   };
   body.querySelectorAll('.board-tabs button').forEach((b) => b.addEventListener('click', () => { boardTab = b.dataset.b; renderBoard(); }));
   $('.sprint-go', body).addEventListener('click', openSprint);
+  $('.open-chest', body)?.addEventListener('click', () => { closeSheet(); openChest(); });
+  $('.duel-go', body).addEventListener('click', () => openDuel());
   renderBoard();
   openSheet('Your progress', body, 'tall');
+}
+
+// ------------------------------------------------------------------ duels
+// Play 5 AMC/AIME problems, then send a friend a link with the same five and your score.
+const DUEL_LEN = 5;
+const encodeDuel = async (d) => encodePost({ b: 'duel', duel: d });
+async function decodeDuel(s) { const p = await decodePost(s); if (!p.duel || !Array.isArray(p.duel.r)) throw new Error('bad duel'); return p.duel; }
+const rowIdx = (card) => Number(String(card.id).split(':').pop());
+async function duelProblems() {
+  const out = [];
+  for (let tries = 0; out.length < DUEL_LEN && tries < 25; tries++) {
+    try {
+      const c = await SOURCES.contest.fetch({ ...fetchSettings(), filters: { ...filters(), checkable: true, qtype: 'any' }, topics: [...PROBLEM_TOPICS] });
+      if (c.answer && (c.answer.type === 'choice' || c.answer.type === 'numeric') && !out.some((x) => x.id === c.id)) out.push(c);
+    } catch { /* try again */ }
+  }
+  if (out.length < DUEL_LEN) throw new Error('Couldn’t load problems. Check your connection.');
+  return out;
+}
+function openDuel(challenge = null) {
+  const body = document.createElement('div');
+  body.className = 'sprint duel';
+  const fmt = (ms) => { const t = Math.round(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+  const intro = challenge
+    ? `<div class="duel-intro"><div class="duel-vs">⚔</div><h3>@${escapeHTML(challenge.n || 'A friend')} challenged you!</h3><p>${DUEL_LEN} AMC/AIME problems. They got <b>${challenge.s}/${DUEL_LEN}</b> in <b>${fmt(challenge.t)}</b>. Can you beat that?</p><button class="btn wide go">Accept the duel</button></div>`
+    : `<div class="duel-intro"><div class="duel-vs">⚔</div><h3>Duel a friend</h3><p>Answer ${DUEL_LEN} AMC/AIME problems as fast as you can. Then send your friend a link: they get the <b>same five</b>, and you see who wins.</p><button class="btn wide go">Start</button></div>`;
+  body.innerHTML = intro;
+  let alive = true;
+  const stop = () => { alive = false; };
+  $('.go', body).addEventListener('click', async () => {
+    body.innerHTML = '<p class="loader-msg">Getting the problems ready…</p>';
+    let cards;
+    try { cards = challenge ? await Promise.all(challenge.r.map((i) => numinaByIndex(i))) : await duelProblems(); } catch (e) { body.innerHTML = `<p class="loader-msg">${escapeHTML(e.message)}</p>`; return; }
+    if (!alive) return;
+    body.innerHTML = `<div class="sprint-bar"><span class="sprint-count"></span><span class="sprint-time">0:00</span></div><div class="sprint-progress"><span></span></div><div class="sprint-stage"></div>`;
+    const stage = $('.sprint-stage', body);
+    const results = [];
+    const start = Date.now();
+    const timer = setInterval(() => { if (!alive) { clearInterval(timer); return; } $('.sprint-time', body).textContent = fmt(Date.now() - start); }, 500);
+    const show = () => {
+      const i = results.length;
+      $('.sprint-count', body).textContent = `${Math.min(i + 1, DUEL_LEN)} / ${DUEL_LEN}`;
+      $('.sprint-progress span', body).style.width = `${(100 * i) / DUEL_LEN}%`;
+      if (i >= DUEL_LEN) { clearInterval(timer); finish(Date.now() - start); return; }
+      let done = false;
+      const el = buildCard({ ...cards[i], daily: false }, { standalone: true, onAnswered: (ok) => { if (done) return; done = true; results.push(ok); setTimeout(() => alive && show(), ok ? 800 : 1800); } });
+      el.querySelectorAll('.rail .sol, .rail .open, .hint-btn').forEach((x) => x.remove());
+      el._firstSeen = Date.now() - 600000; // no think-time lock in a duel
+      stage.innerHTML = ''; stage.appendChild(el);
+    };
+    const finish = async (ms) => {
+      const score = results.filter(Boolean).length;
+      const ids = cards.map(rowIdx);
+      gainXp(score * 5);
+      let verdict = '';
+      if (challenge) {
+        const win = score > challenge.s || (score === challenge.s && ms < challenge.t);
+        const tie = score === challenge.s && Math.abs(ms - challenge.t) < 1000;
+        verdict = tie ? 'It’s a tie!' : win ? 'You win! 🏆' : `@${escapeHTML(challenge.n || 'They')} wins this one`;
+        if (win && !tie) { gainXp(30); sound('level'); } else sound('quest');
+        state.stats.duelsWon = (state.stats.duelsWon || 0) + (win && !tie ? 1 : 0);
+      }
+      state.stats.duels = (state.stats.duels || 0) + 1; saveStats();
+      const name = cloud.currentUser()?.username || state.profile.name || 'Mathlete';
+      const link = `${PUBLIC_URL}#duel=${await encodeDuel({ r: ids, s: score, t: ms, n: name })}`;
+      body.innerHTML = `<div class="sprint-done"><div class="score">${score}<small>/ ${DUEL_LEN}</small></div>
+        ${verdict ? `<h3 class="verdict">${verdict}</h3><p>You: ${score}/${DUEL_LEN} in ${fmt(ms)} · @${escapeHTML(challenge.n || 'them')}: ${challenge.s}/${DUEL_LEN} in ${fmt(challenge.t)}</p>` : `<p>Time ${fmt(ms)}. Now send it to a friend — they’ll get the same five problems.</p>`}
+        <div class="dots">${results.map((r) => `<span class="${r ? 'right' : 'wrong'}"></span>`).join('')}</div>
+        <button class="btn wide send">${challenge ? 'Send a rematch' : 'Challenge a friend'}</button><button class="btn ghost wide again">New duel</button></div>`;
+      $('.send', body).addEventListener('click', () => shareTextUrl(challenge
+        ? `${verdict.replace(/<[^>]+>/g, '')} I got ${score}/${DUEL_LEN} in ${fmt(ms)} on our MathScroll duel. Rematch?`
+        : `I got ${score}/${DUEL_LEN} in ${fmt(ms)} on these MathScroll problems. Can you beat me?`, link));
+      $('.again', body).addEventListener('click', () => openDuel());
+    };
+    show();
+  });
+  openSheet(challenge ? 'Duel' : 'Duel a friend', body, 'tall', stop);
+}
+async function shareTextUrl(text, url) {
+  try { if (navigator.share) { await navigator.share({ title: 'MathScroll duel', text, url }); return; } } catch (e) { if (e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(`${text} ${url}`); toast('Link copied — send it to a friend'); } catch { toast('Couldn’t copy the link'); }
 }
 
 // ------------------------------------------------------------------ settings
@@ -2103,6 +2363,9 @@ function openSettings() {
   const pers = h(`<label class="row"><span><b>Personalise For you</b><small>Show more of what you like, save and solve</small></span><input type="checkbox" class="switch" ${st.personalise ? 'checked' : ''}></label>`);
   pers.querySelector('input').addEventListener('change', (e) => { st.personalise = e.target.checked; saveSettings(); });
   feedGroup.appendChild(pers);
+  const snd = h(`<label class="row"><span><b>Sounds</b><small>Little chimes for correct answers, chests and level-ups</small></span><input type="checkbox" class="switch" ${st.sound ? 'checked' : ''}></label>`);
+  snd.querySelector('input').addEventListener('change', (e) => { st.sound = e.target.checked; saveSettings(); if (st.sound) sound('correct'); });
+  feedGroup.appendChild(snd);
   const dailyRow = h(`<label class="row"><span><b>Daily challenge</b><small>One AMC/AIME problem a day, the same for everyone</small></span><input type="checkbox" class="switch" ${st.daily ? 'checked' : ''}></label>`);
   dailyRow.querySelector('input').addEventListener('change', (e) => { st.daily = e.target.checked; saveSettings(); if (!st.daily) state.pins = state.pins.filter((p) => !p.daily); });
   feedGroup.appendChild(dailyRow);
@@ -2224,10 +2487,18 @@ document.addEventListener('click', (e) => {
 
 $('#profileBtn').addEventListener('click', openProfile);
 $('#levelBtn').addEventListener('click', openProgress);
+$('#chestBtn').addEventListener('click', openChest);
 $('#createBtn').addEventListener('click', () => openCompose());
 $('#searchBtn').addEventListener('click', () => openSearch());
 
 // ------------------------------------------------------------------ boot
+async function readDuelLink() {
+  const m = location.hash.match(/^#duel=([zj][A-Za-z0-9_-]+)$/);
+  if (!m) return false;
+  history.replaceState(null, '', location.pathname + location.search);
+  try { const d = await decodeDuel(m[1]); setTimeout(() => openDuel(d), 500); return true; } catch { toast('That duel link looks broken'); return false; }
+}
+
 async function readSharedPost() {
   const pm = location.hash.match(/^#post=(\d+)$/);
   if (pm && cloud.cloudEnabled) {
@@ -2281,6 +2552,7 @@ async function boot() {
   applyTheme();
   if (state.tab !== 'mix' && !state.settings.sources[state.tab]) state.tab = 'mix';
   const auth = cloud.cloudEnabled ? await cloud.handleAuthRedirect() : null;
+  const duel = await readDuelLink();
   await readSharedPost();
   if (state.justShared) state.tab = 'mix';
   renderTabs();
@@ -2289,7 +2561,8 @@ async function boot() {
   if (auth?.error) setTimeout(() => { toast(auth.error); openAuth(auth.error); }, 500);
   else if (auth?.type === 'recovery') setTimeout(openNewPassword, 500);
   else if (auth?.user) setTimeout(() => toast(`Email confirmed — welcome, @${auth.user.username || 'you'}!`), 500);
-  if (!store.get('onboarded', false) && !state.justShared && !auth) setTimeout(openWelcome, 400);
+  if (!store.get('onboarded', false) && !state.justShared && !auth && !duel) setTimeout(openWelcome, 400);
+  rollWeek();
   loadDaily();
   applyStreakFreeze();
   renderLevel();
@@ -2314,6 +2587,7 @@ async function boot() {
       return;
     }
     state.justShared = false;
+    if (await readDuelLink()) return;
     await readSharedPost();
     if (state.justShared) { closeSheet(); resetFeed(); }
   });
