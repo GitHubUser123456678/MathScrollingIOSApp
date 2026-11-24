@@ -116,6 +116,42 @@ const GUIDE = {
 GUIDE.oly_nt = GUIDE.nt; GUIDE.oly_comb = GUIDE.comb; GUIDE.oly_alg = GUIDE.alg; GUIDE.oly_geo = GUIDE.geo;
 GUIDE.oly_mixed = GUIDE.nt.map((x, u) => [x[0], GUIDE.comb[u][0], GUIDE.alg[u][0], GUIDE.geo[u][0]]);
 
+// A Wikipedia article for each unit's lecture "concept spotlight".
+const WIKI = {
+  prealgebra: ['Order_of_operations', 'Ratio', 'Prime_number', 'Pythagorean_theorem', 'Fraction'],
+  algebra: ['Linear_equation', 'System_of_linear_equations', 'Quadratic_equation', 'Function_(mathematics)', 'Completing_the_square'],
+  number_theory: ['Divisibility_rule', 'Modular_arithmetic', 'Euclidean_algorithm', "Fermat's_little_theorem", 'Chinese_remainder_theorem'],
+  counting_and_probability: ['Rule_of_product', 'Combination', 'Stars_and_bars_(combinatorics)', 'Binomial_theorem', 'Recurrence_relation'],
+  geometry: ['Triangle', 'Special_right_triangle', 'Inscribed_angle', "Heron's_formula", 'Analytic_geometry'],
+  intermediate_algebra: ['Polynomial_remainder_theorem', 'Inequality_of_arithmetic_and_geometric_means', 'Complex_number', 'Functional_equation', 'Symmetric_polynomial'],
+  precalculus: ['Unit_circle', 'List_of_trigonometric_identities', 'Dot_product', "De_Moivre's_formula", 'Polar_coordinate_system'],
+  oly_nt: ['Parity_(mathematics)', 'Modular_arithmetic', "Euler's_theorem", 'Lifting-the-exponent_lemma', 'Vieta_jumping'],
+  oly_comb: ['Pigeonhole_principle', 'Inclusion–exclusion_principle', 'Invariant_(mathematics)', 'Double_counting_(proof_technique)', 'Probabilistic_method'],
+  oly_alg: ["Vieta's_formulas", 'Inequality_of_arithmetic_and_geometric_means', 'Cauchy–Schwarz_inequality', "Jensen's_inequality", "Muirhead's_inequality"],
+  oly_geo: ['Similarity_(geometry)', 'Power_of_a_point', 'Law_of_sines', "Ceva's_theorem", 'Inversive_geometry'],
+  oly_mixed: ['Mathematical_olympiad', 'Pigeonhole_principle', 'Inequality_of_arithmetic_and_geometric_means', 'Power_of_a_point', 'International_Mathematical_Olympiad'],
+};
+// Memory fades like real memory: half-life starts at a week and doubles with every review (up to 16 weeks).
+const DAY = 86400000;
+function memoryOf(p, course, u) {
+  const m = p.mem?.[course.id]?.[u];
+  if (!m) return null;
+  const half = 7 * DAY * 2 ** Math.min(m.n - 1, 4);
+  return Math.max(0, Math.round(100 * 0.5 ** ((Date.now() - m.t) / half)));
+}
+function touchMemory(p, course, u) {
+  p.mem ||= {}; p.mem[course.id] ||= {};
+  const m = p.mem[course.id][u] || { n: 0, t: 0 };
+  // Reviewing after the memory has faded a bit counts as a real review; cramming twice in a day doesn't.
+  if (Date.now() - m.t > DAY / 2) m.n++;
+  m.t = Date.now(); p.mem[course.id][u] = m;
+}
+const BETS = [
+  { id: 'guess', label: '🤷 Guess', tip: 'No heart lost if wrong, no bonus' },
+  { id: 'think', label: '🙂 Think so', tip: 'Normal' },
+  { id: 'sure', label: '🔒 Sure', tip: '+3 bonus XP if right, but 2 hearts if wrong' },
+];
+
 const UNITS = 5; const PER_UNIT = 5; // 4 lessons + a unit test (the chest sits between lessons 2 and 3)
 const TOTAL = UNITS * PER_UNIT;
 const ZIG = [0, 46, 70, 46, 0, -46, -70, -46];
@@ -145,17 +181,26 @@ export function openLearn(ctx) {
     const unitLocked = done < u * PER_UNIT;
     const unitDone = done >= (u + 1) * PER_UNIT;
     const legend = (p.legend[course.id] || []).includes(u);
-    const band = el(`<div class="unit-band ${unitLocked ? 'locked' : ''} ${legend ? 'legend' : ''}"><div><small>Unit ${u + 1} · ${unitSub(course, u)}</small><b>${legend ? '👑 ' : ''}${unitName(course, u)}</b></div>
+    const mem = unitLocked ? null : memoryOf(p, course, u);
+    const band = el(`<div class="unit-band ${unitLocked ? 'locked' : ''} ${legend ? 'legend' : ''}"><div><small>Unit ${u + 1} · ${unitSub(course, u)}</small><b>${legend ? '👑 ' : ''}${unitName(course, u)}</b>${mem != null ? `<button class="mem-chip ${mem < 60 ? 'rusty' : ''}">🧠 ${mem}%${mem < 60 ? ' · Refresh' : ''}</button>` : ''}</div>
       <span class="band-btns"><button class="band-btn guide" aria-label="Guidebook">📖</button>${unitLocked ? '<button class="btn small jump">Jump here</button>' : unitDone && !legend ? '<button class="band-btn legend-go" aria-label="Legendary challenge">👑</button>' : ''}</span></div>`);
     band.querySelector('.guide').addEventListener('click', () => guidebook(ctx, course, u));
+    band.querySelector('.mem-chip')?.addEventListener('click', () => {
+      if (mem >= 60) return ctx.toast(`Memory ${mem}% — it fades over time. Practise any lesson here to keep it strong.`);
+      startLesson(ctx, course, { unit: u, slot: 0, test: false, questions: 5, hearts: 3, label: `Refresh · Unit ${u + 1}` }, { practice: true });
+    });
     band.querySelector('.jump')?.addEventListener('click', () => confirmJump(ctx, course, u));
     band.querySelector('.legend-go')?.addEventListener('click', () => legendIntro(ctx, course, u));
     path.appendChild(band);
     const col = el('<div class="unit-nodes"></div>');
+    const read = (p.lectures?.[course.id] || []).includes(u);
+    const lec = el(`<div class="node-wrap" style="--x:0px"><button class="lecture-node ${read ? 'read' : ''} ${unitLocked ? 'locked' : ''}" aria-label="Lecture">📚<span>${read ? 'Lecture ✓' : 'Lecture'}</span></button></div>`);
+    lec.querySelector('button').addEventListener('click', () => (unitLocked ? ctx.toast('Unlock this unit first (or jump here)') : startLecture(ctx, course, u)));
+    col.appendChild(lec);
     for (let s = 0; s < PER_UNIT; s++) {
       const k = u * PER_UNIT + s; const info = nodeInfo(k);
       const st = k < done ? 'done' : k === done ? 'current' : 'locked';
-      const n = el(`<div class="node-wrap" style="--x:${ZIG[(k + Math.floor(k / PER_UNIT)) % ZIG.length]}px"><button class="node ${st} ${info.test ? 'test' : ''}" aria-label="${info.label}">${info.test ? '🏆' : st === 'done' ? '✓' : st === 'locked' ? '🔒' : '★'}</button>${st === 'current' ? '<span class="node-start">START</span>' : ''}</div>`);
+      const n = el(`<div class="node-wrap ${st === 'current' ? 'cur' : ''}" style="--x:${ZIG[(k + Math.floor(k / PER_UNIT)) % ZIG.length]}px"><button class="node ${st} ${info.test ? 'test' : ''}" aria-label="${info.label}">${info.test ? '🏆' : st === 'done' ? '✓' : st === 'locked' ? '🔒' : '★'}</button>${st === 'current' ? '<span class="node-start">START</span>' : ''}</div>`);
       n.querySelector('.node').addEventListener('click', () => nodePopup(ctx, course, k, st, n));
       col.appendChild(n);
       if (s === 1) { // treasure chest after lesson 2
@@ -171,6 +216,10 @@ export function openLearn(ctx) {
         col.appendChild(c);
       }
     }
+    const bossBeaten = (p.boss?.[course.id] || []).includes(u);
+    const boss = el(`<div class="node-wrap" style="--x:0px"><button class="boss-node ${bossBeaten ? 'beaten' : unitDone ? 'ready' : ''}" aria-label="Boss problem">${bossBeaten ? '🏅' : '👹'}<span>${bossBeaten ? 'Boss beaten' : 'Boss'}</span></button></div>`);
+    boss.querySelector('button').addEventListener('click', () => (unitDone ? startBoss(ctx, course, u) : ctx.toast('Pass the unit test to face the boss')));
+    col.appendChild(boss);
     path.appendChild(col);
   }
   if (done >= TOTAL) path.appendChild(el(`<div class="course-done">🏆 You finished ${courseName(ctx, course)}! Earn 👑 in every unit, or pick another course.</div>`));
@@ -232,6 +281,7 @@ function startLesson(ctx, course, info, { practice = false, node = null, jump = 
   const oly = isOly(course);
   const Q = info.questions;
   let hearts = info.hearts; let i = 0; let right = 0; let streak = 0; let alive = true;
+  const betting = !review && legend == null; let bet = 'think'; let bonus = 0; let sure = 0; let sureRight = 0;
   const seen = new Set(); const start = Date.now();
   const reviewQueue = review ? p.mistakes.slice(0, Q) : null;
   const ov = el(`<div class="lesson" style="--cc:${course.color}">
@@ -264,10 +314,19 @@ function startLesson(ctx, course, info, { practice = false, node = null, jump = 
     try { card = await next; } catch { stage.innerHTML = '<p class="loader-msg">Couldn’t load problems. Check your connection.</p>'; return; }
     if (!alive || !card) return;
     next = i + 1 < Q ? fetchOne() : null;
-    let answered = false;
-    ctx.mountProblem(stage, { ...card, daily: false }, (ok) => {
+    let answered = false; bet = 'think';
+    stage.innerHTML = `${betting ? `<div class="bet-bar"><small>How sure are you?</small><div>${BETS.map((b) => `<button class="bet ${b.id === bet ? 'on' : ''}" data-b="${b.id}" title="${b.tip}">${b.label}</button>`).join('')}</div><small class="bet-tip">${BETS.find((b) => b.id === bet).tip}</small></div>` : ''}<div class="lesson-card"></div>`;
+    stage.querySelectorAll('.bet').forEach((b) => b.addEventListener('click', () => {
+      if (answered) return; bet = b.dataset.b;
+      stage.querySelectorAll('.bet').forEach((x) => x.classList.toggle('on', x === b));
+      stage.querySelector('.bet-tip').textContent = BETS.find((x) => x.id === bet).tip;
+    }));
+    ctx.mountProblem(stage.querySelector('.lesson-card'), { ...card, daily: false }, (ok) => {
       if (answered) return; answered = true;
       i++;
+      stage.querySelectorAll('.bet').forEach((x) => { x.disabled = true; });
+      if (betting && bet === 'sure') { sure++; if (ok) sureRight++; }
+      if (ok && betting) bonus += bet === 'sure' ? 3 : bet === 'think' ? 1 : 0;
       if (ok) {
         right++; streak++;
         if (review) { p.mistakes = p.mistakes.filter((m) => m.id !== card.id); ctx.save(); }
@@ -275,7 +334,8 @@ function startLesson(ctx, course, info, { practice = false, node = null, jump = 
       } else {
         streak = 0;
         if (!review) { p.mistakes = [card, ...p.mistakes.filter((m) => m.id !== card.id)].slice(0, 25); ctx.save(); }
-        if (hearts <= 9) { hearts--; ov.querySelector('.hearts b').textContent = hearts; ov.querySelector('.hearts').classList.add('lost'); setTimeout(() => ov.querySelector('.hearts')?.classList.remove('lost'), 600); }
+        const cost = betting ? { guess: 0, think: 1, sure: 2 }[bet] : 1;
+        if (hearts <= 9 && cost) { hearts = Math.max(0, hearts - cost); ov.querySelector('.hearts b').textContent = hearts; ov.querySelector('.hearts').classList.add('lost'); setTimeout(() => ov.querySelector('.hearts')?.classList.remove('lost'), 600); }
       }
       ov.querySelector('.lesson-bar i').style.width = `${(100 * i) / Q}%`;
       foot.hidden = false; foot.className = `lesson-foot ${ok ? 'ok' : 'no'}`;
@@ -295,7 +355,8 @@ function startLesson(ctx, course, info, { practice = false, node = null, jump = 
   const finish = () => {
     alive = false;
     const perfect = right === Q;
-    let xp = xpFor(info, oly) + (perfect ? 5 : 0);
+    let xp = xpFor(info, oly) + (perfect ? 5 : 0) + bonus;
+    if (!review) touchMemory(p, course, jump != null ? jump : info.unit);
     if (practice || review) xp = Math.round(xp / 2);
     if (legend != null) xp = xpFor(info, oly) * 2;
     let unlocked = '';
@@ -311,10 +372,147 @@ function startLesson(ctx, course, info, { practice = false, node = null, jump = 
     stage.innerHTML = `<div class="lesson-end"><div class="le-big">${legend != null ? '👑' : info.test || jump != null ? '🏆' : perfect ? '🌟' : '🎉'}</div><h2>${legend != null ? 'Legendary!' : review ? 'Review done!' : jump != null ? 'Test passed!' : info.test ? 'Unit complete!' : perfect ? 'Perfect lesson!' : 'Lesson complete!'}</h2>
       ${unlocked ? `<p class="le-unlock">${unlocked}</p>` : ''}
       <div class="le-stats"><div><small>XP</small><b>+${xp}</b></div><div><small>Accuracy</small><b>${Math.round((100 * right) / Q)}%</b></div><div><small>Time</small><b>${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}</b></div></div>
+      ${sure ? `<p class="le-calib">🎯 Calibration: ${sureRight}/${sure} of your “sure” answers were right${sureRight === sure ? ' — you know what you know!' : sureRight / sure < 0.6 ? ' — careful with that lock!' : '.'}</p>` : ''}
+      ${bonus ? `<p class="small">Includes +${bonus} XP from confidence bets.</p>` : ''}
       <p class="small">You also earned ${right} ⚡ for the mini-games.</p>
       <button class="btn wide cont">Continue</button><button class="btn ghost wide share-l">Share</button></div>`;
     stage.querySelector('.cont').addEventListener('click', quit);
     stage.querySelector('.share-l').addEventListener('click', () => ctx.shareText(`I just finished ${info.label} in ${courseName(ctx, course)} on MathScroll — ${right}/${Q} correct!`));
   };
   show();
+}
+
+// ------------------------------------------------------------------ lectures (story-style slides)
+function startLecture(ctx, course, u) {
+  ctx.closeSheet();
+  const p = ctx.progress();
+  const tips = (GUIDE[course.id] || [])[u] || [];
+  const spec = problemSpec(course, u);
+  const ov = el(`<div class="story" style="--cc:${course.color}"><div class="story-bars"></div><button class="story-x" aria-label="Close">✕</button><div class="story-slide"></div>
+    <div class="story-nav"><button class="btn ghost st-prev">‹ Back</button><button class="btn st-next">Next ›</button></div></div>`);
+  document.body.appendChild(ov);
+  const slideEl = ov.querySelector('.story-slide');
+  // Slides are functions that fill the slide element (some load things).
+  const slides = [
+    (box) => { box.innerHTML = `<div class="st-cover"><div class="st-icon">${course.icon}</div><small>${courseName(ctx, course)} · Unit ${u + 1}</small><h2>${unitName(course, u)}</h2><p>${unitSub(course, u)}</p><div class="st-learn"><b>In this lecture</b><ul>${['Key ideas', 'Concept spotlight', 'A worked example, step by step', 'Your turn'].map((x) => `<li>${x}</li>`).join('')}</ul></div><p class="small">Tap Next, or the right side of the screen.</p></div>`; },
+    ...tips.map((t, k) => (box) => { box.innerHTML = `<div class="st-idea"><small>Key idea ${k + 1} of ${tips.length}</small><div class="st-big"></div></div>`; box.querySelector('.st-big').appendChild(ctx.renderText(t)); }),
+    async (box) => {
+      box.innerHTML = '<div class="st-idea"><small>Concept spotlight</small><p class="loader-msg">Loading…</p></div>';
+      const title = (WIKI[course.id] || [])[u];
+      try {
+        const w = await ctx.wikiSummary(title);
+        if (!box.isConnected) return;
+        box.innerHTML = `<div class="st-wiki"><small>Concept spotlight · Wikipedia</small><h3>${escapeText(w.title || title.replace(/_/g, ' '))}</h3>${w.thumbnail ? `<img src="${w.thumbnail}" alt="" referrerpolicy="no-referrer">` : ''}<p>${escapeText(w.extract || '')}</p><a href="https://en.wikipedia.org/wiki/${encodeURIComponent(title)}" target="_blank" rel="noopener" class="link">Read the full article</a></div>`;
+      } catch { box.innerHTML = `<div class="st-idea"><small>Concept spotlight</small><h3>${title.replace(/_/g, ' ')}</h3><p>Couldn’t load the article — check your connection.</p></div>`; }
+    },
+    async (box) => {
+      box.innerHTML = '<div class="st-ex"><small>Worked example</small><p class="loader-msg">Finding a good example…</p></div>';
+      let card = null;
+      for (let t = 0; t < 4 && !card; t++) { try { const c = await ctx.fetchProblem(spec, new Set()); if (c.solutionHtml) card = c; } catch { /* again */ } }
+      if (!box.isConnected) return;
+      if (!card) { box.innerHTML = '<div class="st-ex"><small>Worked example</small><p>Couldn’t load an example right now.</p></div>'; return; }
+      box.innerHTML = '<div class="st-ex"><small>Worked example</small><div class="st-prob"></div><div class="st-steps"></div><button class="btn wide st-step">Show the first step</button></div>';
+      box.querySelector('.st-prob').appendChild(ctx.renderHtml(card));
+      const sol = ctx.renderHtml({ ...card, html: card.solutionHtml });
+      let parts = [...sol.querySelectorAll(':scope > .tt > *, :scope > p, :scope > div > p')];
+      if (parts.length < 2) parts = [sol];
+      let k = 0;
+      const btn = box.querySelector('.st-step');
+      btn.addEventListener('click', () => {
+        const step = el(`<div class="st-stepbox"><b>Step ${k + 1}</b></div>`); step.appendChild(parts[k]); box.querySelector('.st-steps').appendChild(step);
+        k++; ctx.sound('quest');
+        if (k >= parts.length) { btn.textContent = card.answer ? 'Done — that’s the answer!' : 'Done'; btn.disabled = true; } else btn.textContent = `Show step ${k + 1} of ${parts.length}`;
+        step.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
+    },
+    async (box) => {
+      box.innerHTML = '<div class="st-ex"><small>Your turn</small><p class="loader-msg">Loading a problem…</p></div>';
+      let card = null;
+      for (let t = 0; t < 4 && !card; t++) { try { card = await ctx.fetchProblem(spec, new Set()); } catch { /* again */ } }
+      if (!box.isConnected) return;
+      if (!card) { box.innerHTML = '<div class="st-ex"><small>Your turn</small><p>Couldn’t load a problem right now.</p></div>'; return; }
+      box.innerHTML = '<div class="st-ex"><small>Your turn — try one</small><div class="st-try"></div></div>';
+      ctx.mountProblem(box.querySelector('.st-try'), { ...card, daily: false }, () => {});
+    },
+    (box) => {
+      const first = !(p.lectures?.[course.id] || []).includes(u);
+      if (first) { p.lectures ||= {}; (p.lectures[course.id] ||= []).push(u); ctx.save(); ctx.lectureDone(15); }
+      box.innerHTML = `<div class="st-cover"><div class="st-icon">🎓</div><h2>Lecture complete</h2>${first ? '<p class="le-unlock">+15 XP</p>' : ''}<p>Now put it to work in the lessons.</p><button class="btn wide st-go">Back to the path</button></div>`;
+      box.querySelector('.st-go').addEventListener('click', close);
+    },
+  ];
+  let k = 0;
+  ov.querySelector('.story-bars').innerHTML = slides.map(() => '<i></i>').join('');
+  const show = () => {
+    ov.querySelectorAll('.story-bars i').forEach((b, j) => b.classList.toggle('on', j <= k));
+    slideEl.innerHTML = ''; slideEl.scrollTop = 0;
+    const box = el('<div class="st-inner"></div>'); slideEl.appendChild(box);
+    slides[k](box);
+    ov.querySelector('.st-prev').style.visibility = k ? 'visible' : 'hidden';
+    ov.querySelector('.st-next').style.visibility = k < slides.length - 1 ? 'visible' : 'hidden';
+  };
+  const go = (d) => { const n = Math.max(0, Math.min(slides.length - 1, k + d)); if (n !== k) { k = n; show(); } };
+  function close() { ov.remove(); openLearn(ctx); }
+  ov.querySelector('.st-next').addEventListener('click', () => go(1));
+  ov.querySelector('.st-prev').addEventListener('click', () => go(-1));
+  ov.querySelector('.story-x').addEventListener('click', close);
+  slideEl.addEventListener('click', (e) => {
+    if (e.target.closest('button, a, input, form, .card, .st-try, .st-steps, img')) return;
+    go(e.clientX < window.innerWidth / 3 ? -1 : 1);
+  });
+  show();
+}
+const escapeText = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ------------------------------------------------------------------ boss problems
+function startBoss(ctx, course, u) {
+  ctx.closeSheet();
+  const p = ctx.progress(); const oly = isOly(course);
+  const spec = isOly(course) ? problemSpec(course, Math.min(UNITS - 1, u + 1)) : { kind: 'math', config: course.id, level: Math.min(5, u + 2) };
+  const base = Math.round((60 + 20 * u) * (oly ? 1.5 : 1));
+  let hintsUsed = 0; let card = null; let answered = false;
+  const ov = el(`<div class="lesson boss" style="--cc:${course.color}">
+    <div class="lesson-top"><button class="lesson-x" aria-label="Leave">✕</button><div class="boss-title">👹 Boss · Unit ${u + 1}<small>One problem, a level harder. Hints lower the reward.</small></div></div>
+    <div class="lesson-stage"><p class="loader-msg">The boss approaches…</p></div>
+    <div class="boss-hints"></div></div>`);
+  document.body.appendChild(ov);
+  const stage = ov.querySelector('.lesson-stage'); const hintsEl = ov.querySelector('.boss-hints');
+  const close = () => { ov.remove(); openLearn(ctx); };
+  ov.querySelector('.lesson-x').addEventListener('click', close);
+  const reward = () => Math.round(base * (1 - 0.2 * hintsUsed));
+  const drawHints = () => {
+    if (answered || !card) { hintsEl.innerHTML = ''; return; }
+    const ladder = [((GUIDE[course.id] || [])[u] || [])[0] ? 'Key idea' : null, card.hintHtml ? 'Nudge' : null, card.solutionHtml ? 'First step' : null].filter(Boolean);
+    hintsEl.innerHTML = `<span class="small">Reward: <b>+${reward()} XP · +5 ⚡</b></span>${hintsUsed < ladder.length ? `<button class="btn ghost small boss-hint">💡 ${ladder[hintsUsed]} (−20%)</button>` : ''}`;
+    hintsEl.querySelector('.boss-hint')?.addEventListener('click', () => {
+      const kind = ladder[hintsUsed]; hintsUsed++;
+      const box = el(`<div class="hint-box"><b>${kind}</b> </div>`);
+      if (kind === 'Key idea') box.appendChild(ctx.renderText(GUIDE[course.id][u][0]));
+      else if (kind === 'Nudge') box.appendChild(ctx.renderHtml({ ...card, html: card.hintHtml }));
+      else { const sol = ctx.renderHtml({ ...card, html: card.solutionHtml }); const first = sol.querySelector('p') || sol; box.appendChild(first); }
+      stage.querySelector('.boss-hintlist').appendChild(box);
+      drawHints();
+    });
+  };
+  (async () => {
+    for (let t = 0; t < 4 && !card; t++) { try { card = await ctx.fetchProblem(spec, new Set()); } catch { /* again */ } }
+    if (!ov.isConnected) return;
+    if (!card) { stage.innerHTML = '<p class="loader-msg">Couldn’t load the boss problem. Check your connection.</p>'; return; }
+    stage.innerHTML = '<div class="boss-hintlist"></div><div class="lesson-card"></div>';
+    ctx.mountProblem(stage.querySelector('.lesson-card'), { ...card, daily: false }, (ok) => {
+      if (answered) return; answered = true; drawHints();
+      setTimeout(() => {
+        const xp = reward();
+        if (ok) {
+          if (!(p.boss ||= {})[course.id]?.includes(u)) (p.boss[course.id] ||= []).push(u);
+          touchMemory(p, course, u); ctx.save(); ctx.chest(5, xp); ctx.sound('level');
+        }
+        const pnl = el(`<div class="quit-ask boss-end"><b>${ok ? '🏅 Boss defeated!' : '👹 The boss survived'}</b><p>${ok ? `+${xp} XP and +5 ⚡${hintsUsed ? ` (${hintsUsed} hint${hintsUsed > 1 ? 's' : ''} used)` : ' — no hints!'}` : 'Read the solution, then challenge a new boss.'}</p>${ok ? '' : '<button class="btn wide again">New boss</button>'}<button class="btn ${ok ? '' : 'ghost'} wide back">Back to the path</button></div>`);
+        ov.appendChild(pnl);
+        pnl.querySelector('.again')?.addEventListener('click', () => { ov.remove(); startBoss(ctx, course, u); });
+        pnl.querySelector('.back').addEventListener('click', close);
+      }, ok ? 900 : 1600);
+    });
+    drawHints();
+  })();
 }

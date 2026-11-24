@@ -5,27 +5,43 @@ const el = (html) => { const t = document.createElement('template'); t.innerHTML
 const rnd = (n) => Math.floor(Math.random() * n);
 import { legal as chessLegal, make as chessMake, inCheck as chessInCheck, san as chessSan, fromFEN, moveFromUci, uciOf } from './chess.js';
 
-export const GAMES = [
-  { id: 'blockblast', name: 'Block Blast', icon: '🧱', blurb: 'Drop blocks, clear rows and columns.', cost: '1⚡ per 3 pieces' },
-  { id: 'chess', name: 'Chess Puzzles', icon: '♞', blurb: 'Find the winning move. Puzzles get harder as your rating rises.', cost: '1⚡ per puzzle' },
-  { id: 'sumblast', name: 'Sum Blast', icon: '💥', blurb: 'Drag through tiles that add up to the target. 90 seconds.', cost: '1⚡ per game' },
-  { id: 'g24', name: '24', icon: '🎯', blurb: 'Use all four numbers with + − × ÷ to make 24.', cost: 'Free — it’s maths' },
-  { id: 'queens', name: 'Queens', icon: '♛', blurb: 'Place N queens so no two attack each other.', cost: '1⚡ per board' },
-  { id: 'rush', name: 'Mental Math Rush', icon: '⚡', blurb: 'As many sums as you can in 60 seconds.', cost: 'Free — it’s maths' },
+import { GAMES2, PAID2, play2 } from './games2.js';
+const BASE_GAMES = [
+  { id: 'blockblast', name: 'Block Blast', icon: '🧱', blurb: 'Drop blocks, clear rows and columns.', cost: '1⚡ per 3 pieces', cat: 'arcade' },
+  { id: 'chess', name: 'Chess Puzzles', icon: '♞', blurb: 'Find the winning move. Puzzles get harder as your rating rises.', cost: '1⚡ per puzzle', cat: 'classic' },
+  { id: 'sumblast', name: 'Sum Blast', icon: '💥', blurb: 'Drag through tiles that add up to the target. 90 seconds.', cost: '1⚡ per game', cat: 'arcade' },
+  { id: 'g24', name: '24', icon: '🎯', blurb: 'Use all four numbers with + − × ÷ to make 24.', cost: 'Free — it’s maths', cat: 'classic' },
+  { id: 'queens', name: 'Queens', icon: '♛', blurb: 'Place N queens so no two attack each other.', cost: '1⚡ per board', cat: 'classic' },
+  { id: 'rush', name: 'Mental Math Rush', icon: '⚡', blurb: 'As many sums as you can in 60 seconds.', cost: 'Free — it’s maths', cat: 'speed' },
 ];
+export const GAMES = [...BASE_GAMES, ...GAMES2];
+// The featured game changes every day and pays double XP.
+export function gameOfDay(date = new Date()) {
+  const d = Math.floor((date.getTime() - date.getTimezoneOffset() * 60000) / 86400000);
+  return GAMES[(d * 7 + 3) % GAMES.length].id;
+}
+const CATS = [['puzzle', '🧠 Puzzles'], ['arcade', '🕹️ Arcade'], ['classic', '♟️ Classics'], ['speed', '⚡ Speed maths · free']];
 
 // ------------------------------------------------------------------ hub
 export function openGames(ctx) {
   const best = ctx.bests();
-  const body = el(`<div class="games-hub">${GAMES.map((g) => `
-    <button class="game-tile" data-g="${g.id}"><span class="g-icon">${g.icon}</span><span class="g-text"><b>${g.name}</b><small>${g.blurb}</small><span class="g-cost">${g.cost}</span>${best[g.id] ? `<em>Best: ${ctx.bestLabel(g.id, best[g.id])}</em>` : ''}</span></button>`).join('')}
-    <p class="small">You have <b>${ctx.charges()} ⚡</b>. Every problem you get right — in the feed, in Learn, or right here — earns ⚡. Problem difficulty for games: <b>${ctx.gameLevelName()}</b> <button class="link g-level">change</button></p></div>`);
-  body.querySelectorAll('.game-tile').forEach((b) => b.addEventListener('click', () => startGame(b.dataset.g, ctx)));
+  const gotd = GAMES.find((g) => g.id === gameOfDay());
+  const tile = (g) => `<button class="gm-tile" data-g="${g.id}"><span class="gm-icon">${g.icon}</span><b>${g.name}</b><small>${best[g.id] != null && best[g.id] > 0 ? `Best ${ctx.bestLabel(g.id, best[g.id])}` : g.cost}</small></button>`;
+  const body = el(`<div class="games-hub">
+    <div class="gm-top"><span class="g-charge-static">⚡ <b>${ctx.charges()}</b></span><span class="small">Problems for ⚡: <b>${ctx.gameLevelName()}</b> <button class="link g-level">change</button></span></div>
+    <button class="gm-feature" data-g="${gotd.id}"><span class="gm-icon">${gotd.icon}</span><span><small>GAME OF THE DAY · 2× XP</small><b>${gotd.name}</b><em>${gotd.blurb}</em></span></button>
+    ${CATS.map(([c, label]) => `<h4 class="gm-cat">${label}</h4><div class="gm-grid">${GAMES.filter((g) => g.cat === c).map(tile).join('')}</div>`).join('')}
+    <p class="small">Every problem you get right — in the feed, in Learn, or in a game — earns ⚡. Speed-maths games are free because they’re maths already.</p></div>`);
+  body.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => startGame(b.dataset.g, ctx)));
   body.querySelector('.g-level').addEventListener('click', () => ctx.pickGameLevel(() => openGames(ctx)));
   ctx.openSheet('Games', body, 'tall');
 }
 const ENTRY = { sumblast: 'play Sum Blast', queens: 'play Queens' };
 export async function startGame(id, ctx, ...args) {
+  if (GAMES2.some((g) => g.id === id)) {
+    if (PAID2.has(id) && !(await payOrSolve(ctx, `play ${GAMES2.find((g) => g.id === id).name}`))) return;
+    return play2(id, { ...ctx, startGame: (gid) => startGame(gid, ctx), openGames: () => openGames(ctx) });
+  }
   if (ENTRY[id] && !(await payOrSolve(ctx, ENTRY[id]))) return;
   ({ blockblast: blockBlast, chess, sumblast: sumBlast, g24: game24, queens, rush })[id](ctx, ...args);
 }

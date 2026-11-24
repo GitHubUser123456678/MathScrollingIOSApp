@@ -29,9 +29,20 @@ Why the mirrors? AoPS puts every automated request through a bot check, and Proo
 - **XP & levels**: every solve earns XP (more for harder problems, ×1.5–×2.5 combos for answer streaks), plus a daily sign-in bonus; level-ups with titles from Novice to Legend.
 - **Rewards**: lucky "critical" solves (2× XP), a chest every 5 solves and every level-up (XP, streak freezes, avatar frames, jackpots), "on fire" mode at 5 in a row, sound effects, and an always-visible XP bar.
 - **Leagues**: Bronze → Silver → Gold → Platinum → Diamond → Master by weekly XP.
-- **🎓 Learn** (Duolingo-style): **Foundations** courses (Prealgebra, Algebra, Number Theory, Counting & Probability, Geometry, Intermediate Algebra, Precalculus; MATH levels 1–5) and **Olympiad** courses (Number Theory, Combinatorics, Algebra, Geometry, Mixed; Omni-MATH problems from warm-ups up to IMO level). Each course is a winding path of 5 units. A unit has four lessons, a 🎁 treasure chest (bonus ⚡ and XP), a 🏆 unit test, a 📖 guidebook of key ideas, and a 👑 legendary challenge (no mistakes allowed). Lessons have hearts and "in a row" streaks. Missed problems go into a 🔁 mistakes review. You can jump ahead by passing a test.
+- **🎓 Learn**: **Foundations** courses (7 MATH subjects, levels 1–5) and **Olympiad** courses (number theory, combinatorics, algebra, geometry, mixed; Omni-MATH, warm-up to IMO). Each unit has:
+  - a 📚 **lecture**: tap-through slides with key ideas, a concept spotlight from Wikipedia, a real worked example revealed step by step, and a "your turn" problem;
+  - four lessons with hearts and **confidence bets** (🤷 guess / 🙂 think so / 🔒 sure: sure pays bonus XP but costs two hearts if wrong; your calibration is shown at the end);
+  - a 🎁 chest, a 🏆 unit test, and a 👹 **boss problem** one level harder, with a hint ladder that lowers the reward;
+  - a 🧠 **memory meter** that fades like real memory (one-week half-life, doubling with each review) and asks you to refresh;
+  - a 📖 guidebook and a 👑 legendary no-mistakes challenge, plus a 🔁 mistakes review.
 - **Answers you can type**: besides whole numbers and multiple choice, problems with answers like 3/4, 2√3 or π/6 are checked by value. You can type `3/4`, `2sqrt(3)` or `pi/6`.
-- **Mini-games** (🎮 Games tab), played with ⚡ that you earn by solving problems: *Block Blast* (1 ⚡ per three pieces; out of room → solve a problem for a second chance), *Chess Puzzles* from the Lichess puzzle database (6 million+, CC0) that follow your own puzzle rating (1 ⚡ per puzzle), *Sum Blast* and *Queens* (1 ⚡ per game), and *24* and *Mental Math Rush* (free, since they're maths). A Quick 24 card also shows up in the feed.
+- **26 mini-games** (🎮 Games tab), grouped as Puzzles, Arcade, Classics and Speed maths, with a daily **game of the day** for 2× XP:
+  - **Puzzles:** Sudoku, Minesweeper, Lights Out, Tower of Hanoi, 15-Puzzle, Code Breaker, Nim, Magic Square.
+  - **Arcade:** Block Blast, 2048, Sum Blast.
+  - **Classics:** Chess Puzzles (Lichess, rated), Queens.
+  - **Speed maths:** 24, Mental Math Rush, Memory Match, and ten 60-second quick-fire rounds (Prime or Not, Which Is Bigger?, Next in Line, Solve for x, Estimation Station, Binary Bits, Angle Eye, Last Digit, Divisor Count, Clock Maths).
+  - Puzzle and arcade games cost ⚡ (earned by solving problems). Speed-maths games are free.
+- **Feed**: odd or broken cards are skipped (problems that refer to a missing figure, garbled or near-empty text, stub articles) while every source stays in. Every 8 cards the For you feed drops in a ⚡ lightning round, a Quick 24, a "continue your course" card or the game of the day.
 - **⚡ Charges**: every correct answer — feed, Learn or in-game — earns 1 ⚡. When you're out, the game hands you a problem to solve. Set how hard those problems are in Games → change (Easy, Medium, Hard, Expert).
 - **Duels**: play 5 AMC/AIME problems, send a friend a link with the same five, see who wins (no account needed).
 - **Avatar frames** to collect and equip; a session recap every 30 minutes.

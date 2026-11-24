@@ -2,7 +2,8 @@ import { SOURCES, PROBLEM_TOPICS, escapeHTML, textToHtml, answerFor, searchAll, 
 import { renderContent } from './render.js';
 import { exprValue, sameValue } from './expr.js';
 import * as cloud from './cloud.js';
-import { openGames, mount24, GAMES, payOrSolve } from './games.js';
+import { openGames, mount24, GAMES, payOrSolve, gameOfDay, startGame } from './games.js';
+import { quickQuestion, QUICK_KINDS } from './games2.js';
 import { openLearn } from './learn.js';
 
 // Where shared post links point. On the website it's the site itself; inside the iOS app it's the public site.
@@ -138,8 +139,11 @@ const BADGES = [
   { id: 'save10', name: 'Collector', desc: 'Save 10 cards', test: () => state.saved.length >= 10 },
   { id: 'learner', name: 'Scholar', desc: 'Finish 10 Learn lessons', test: () => (state.stats.learn?.lessons || 0) >= 10 },
   { id: 'unit1', name: 'Unit cleared', desc: 'Pass a unit test in Learn', test: () => Object.values(state.stats.learn?.done || {}).some((d) => d >= 5) },
+  { id: 'boss1', name: 'Boss slayer', desc: 'Defeat a unit boss in Learn', test: () => Object.values(state.stats.learn?.boss || {}).some((l) => l.length) },
+  { id: 'lecturer', name: 'Lecture hall', desc: 'Finish 5 Learn lectures', test: () => Object.values(state.stats.learn?.lectures || {}).reduce((a, l) => a + l.length, 0) >= 5 },
   { id: 'puzzler', name: 'Tactician', desc: 'Solve 10 chess puzzles', test: () => (state.stats.puzzlesSolved || 0) >= 10 },
-  { id: 'gamer', name: 'Gamer', desc: 'Play every mini-game', test: () => GAMES.every((g) => (state.stats.games || {})[g.id] != null) },
+  { id: 'gamer', name: 'Gamer', desc: 'Play 10 different mini-games', test: () => Object.keys(state.stats.games || {}).length >= 10 },
+  { id: 'arcade', name: 'Arcade legend', desc: 'Play every mini-game', test: () => GAMES.every((g) => (state.stats.games || {})[g.id] != null) },
   { id: 'maker24', name: 'Twenty-four', desc: 'Solve 10 “make 24” puzzles', test: () => (state.stats.solved24 || 0) >= 10 },
   { id: 'duel1', name: 'Duelist', desc: 'Win a duel', test: () => (state.stats.duelsWon || 0) >= 1 },
   { id: 'level10', name: 'Double digits', desc: 'Reach level 10', test: () => levelFor(state.stats.xp || 0) >= 10 },
@@ -260,6 +264,7 @@ const QUEST_POOL = [
   { id: 'game1', text: 'Play a mini-game', goal: 1, ev: 'game', xp: 20 },
   { id: 'lesson1', text: 'Finish a Learn lesson', goal: 1, ev: 'lesson', xp: 25 },
   { id: 'lesson3', text: 'Finish 3 Learn lessons', goal: 3, ev: 'lesson', xp: 50 },
+  { id: 'lecture1', text: 'Watch a Learn lecture', goal: 1, ev: 'lecture', xp: 20 },
 ];
 // Three quests a day, the same for everyone, picked from the date.
 function questsFor(date) {
@@ -667,9 +672,29 @@ async function communityCard() {
   return cloudCard(fresh[Math.floor(Math.random() * fresh.length)]);
 }
 
-let sinceGame = 0;
+// Outliers: cards that would show up broken or odd. All sources stay in; just these cards are skipped.
+const FIGURE_REF = /\b(as shown|shown (in|below|above)|in the (figure|diagram|picture|graph) (below|above|shown)|see (the )?(figure|diagram)|the (figure|diagram|picture) (below|above|shows)|figure \d|following (figure|diagram))\b/i;
+function isOutlier(card) {
+  const html = card.html || '';
+  const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const hasPicture = /<img|asy-src|<svg|class="figure"/.test(html);
+  if (card.source === 'wikipedia') return text.length < 280;
+  if (card.source === 'oeis' || card.source === 'proofwiki') return text.length < 20;
+  if (text.length < 25 || text.length > 6000) return true;
+  if (!hasPicture && FIGURE_REF.test(text)) return true; // refers to a picture we don't have
+  if (/\uFFFD|\?\?\?\?|\[\s*\]\s*$/.test(text)) return true; // garbled text
+  if (/^(problem|question)\s*\d*[.:]?\s*$/i.test(text)) return true;
+  return false;
+}
+// Between problems the For you feed drops in something different now and then.
+const INTERSTITIALS = ['lightning', 'q24', 'course', 'lightning', 'gotd', 'q24', 'lightning', 'course'];
+let sinceGame = 0; let interIdx = 0;
 async function fetchCard() {
-  if (state.tab === 'mix' && ++sinceGame >= 11) { sinceGame = 0; return { id: `game:24:${Date.now()}`, source: 'game', heading: 'Quick 24' }; }
+  if (state.tab === 'mix' && ++sinceGame >= 8) {
+    sinceGame = 0;
+    const kind = INTERSTITIALS[interIdx++ % INTERSTITIALS.length];
+    return { id: `game:${kind}:${Date.now()}`, source: 'game', kind, heading: kind };
+  }
   for (let attempt = 0; attempt < 6; attempt++) {
     const list = activeSources();
     if (!list.length) throw new Error('none');
@@ -690,6 +715,7 @@ async function fetchCard() {
       const card = await SOURCES[key].fetch(fetchSettings());
       state.failures[key] = 0;
       if (filters().hideSeen && state.seen.has(card.id) && attempt < 4) continue;
+      if (isOutlier(card) && attempt < 5) { state.skippedOutliers = (state.skippedOutliers || 0) + 1; continue; }
       if (state.cards.some((c) => c.data.id === card.id)) continue;
       return card;
     } catch (err) {
@@ -2226,7 +2252,7 @@ function openFilters() {
 }
 
 // ------------------------------------------------------------------ mini-games
-const BEST_LABEL = { blockblast: (v) => `${v} pts`, chess: (v) => (v > 100 ? `Rating ${v}` : 'Played'), sumblast: (v) => `${v} pts`, g24: (v) => `${v} solved`, queens: (v) => `${v}×${v}`, rush: (v) => `${v} correct` };
+const BEST_LABEL = { g2048: (v) => `${v} pts`, lights: (v) => `Level ${v}`, hanoi: (v) => `${v} discs`, mastermind: (v) => `${11 - v} guesses`, nim: (v) => `Streak ${v}`, magic: (v) => `${v}×${v}`, blockblast: (v) => `${v} pts`, chess: (v) => (v > 100 ? `Rating ${v}` : 'Played'), sumblast: (v) => `${v} pts`, g24: (v) => `${v} solved`, queens: (v) => `${v}×${v}`, rush: (v) => `${v} correct` };
 const gameCtx = {
   openSheet: (...a) => openSheet(...a), closeSheet: () => closeSheet(), toast: (m) => toast(m), sound: (k) => sound(k), shareText: (t) => shareText(t),
   bests: () => state.stats.games || {},
@@ -2256,7 +2282,8 @@ const gameCtx = {
       box.innerHTML = ''; box.appendChild(el);
     });
   },
-  bestLabel: (id, v) => BEST_LABEL[id](v),
+  bestLabel: (id, v) => (BEST_LABEL[id] || (id.startsWith('qf_') ? (x) => `${x} correct` : (x) => `${x} pts`))(v),
+  tex: (t) => texHtml(t),
   recordBest(id, v) {
     const g = (state.stats.games ||= {});
     const isBest = g[id] == null || v > g[id];
@@ -2266,11 +2293,16 @@ const gameCtx = {
   },
   gameDone(id, xp, extra = {}) {
     if (extra.solved24) state.stats.solved24 = (state.stats.solved24 || 0) + extra.solved24;
+    if (id === gameOfDay()) xp *= 2; // game of the day
     gainXp(xp);
     questEvent('game');
     checkBadges();
+    return xp;
   },
 };
+function texHtml(t) {
+  try { return window.katex ? window.katex.renderToString(t, { throwOnError: false }) : escapeHTML(t); } catch { return escapeHTML(t); }
+}
 // ------------------------------------------------------------------ Learn (Duolingo-style courses)
 const learnCtx = {
   openSheet: (...a) => openSheet(...a), closeSheet: () => closeSheet(), toast: (m) => toast(m), sound: (k) => sound(k), shareText: (t) => shareText(t),
@@ -2284,6 +2316,14 @@ const learnCtx = {
     }
   },
   renderText: (t) => renderContent(textToHtml(t), { base: 'text', dollar: true }),
+  renderHtml: (card) => renderContent(card.html, { base: card.base || 'text', dollar: card.dollarMath !== false }),
+  lectureDone(xp) { gainXp(xp); questEvent('lecture'); checkBadges(); saveStats(); },
+  async wikiSummary(title) {
+    const r = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
+    if (!r.ok) throw new Error('wiki');
+    const j = await r.json();
+    return { title: j.title, extract: j.extract, thumbnail: j.thumbnail?.source };
+  },
   chest(charges, xp) { state.stats.charges = gameCtx.charges() + charges; gainXp(xp); saveStats(); sound('chest'); },
   payOrSolve: (what) => payOrSolve(gameCtx, what),
   mountProblem(box, card, onAnswered) {
@@ -2301,6 +2341,69 @@ const learnCtx = {
 
 // A playable "make 24" card that turns up in the feed now and then.
 function buildGameCard(data) {
+  if (data.kind === 'lightning') return buildLightningCard(data);
+  if (data.kind === 'course') return buildCourseCard(data);
+  if (data.kind === 'gotd') return buildGotdCard(data);
+  return build24Card(data);
+}
+const shellCard = (data, pill, where, title, accent) => h(`<section class="card s-game" data-id="${escapeHTML(data.id)}" style="--accent:${accent}"><div class="card-inner">
+      <div class="meta"><span class="pill">${pill}</span><span class="where">${where}</span></div>
+      <h2 class="heading">${title}</h2><div class="content"><div class="slot"></div></div></div></section>`);
+// Three rapid questions right in the feed.
+function buildLightningCard(data) {
+  const kind = QUICK_KINDS[Math.floor(Math.random() * QUICK_KINDS.length)];
+  const el = shellCard(data, '⚡ Lightning round', '3 quick questions', 'Lightning round', '#facc15');
+  const slot = $('.slot', el);
+  let k = 0; let right = 0;
+  const ctx = { tex: texHtml };
+  const next = () => {
+    if (k >= 3) {
+      const xp = right * 4;
+      if (xp) gainXp(xp, slot);
+      questEvent('game'); checkBadges();
+      slot.innerHTML = `<div class="lt-done"><b>${right}/3</b><span>${right === 3 ? 'Flawless! ' : ''}${xp ? `+${xp} XP` : 'Better luck next round'}</span></div><button class="btn ghost small lt-more">Play a full round</button>`;
+      $('.lt-more', slot).addEventListener('click', () => startGame(`qf_${kind}`, gameCtx));
+      return;
+    }
+    const q = quickQuestion(ctx, kind);
+    slot.innerHTML = `<div class="lt-dots">${[0, 1, 2].map((j) => `<i class="${j < k ? 'done' : j === k ? 'now' : ''}"></i>`).join('')}</div><div class="qf-q lt-q">${q.q}</div><div class="qf-choices n${q.choices.length}">${q.choices.map((c, i) => `<button class="qf-c" data-i="${i}">${c}</button>`).join('')}</div>`;
+    slot.querySelectorAll('.qf-c').forEach((b) => b.addEventListener('click', () => {
+      if (slot.dataset.lock) return; slot.dataset.lock = '1';
+      const ok = +b.dataset.i === q.answer;
+      b.classList.add(ok ? 'right' : 'wrong');
+      if (!ok) slot.querySelectorAll('.qf-c')[q.answer]?.classList.add('right');
+      sound(ok ? 'correct' : 'wrong');
+      if (ok) right++;
+      k++;
+      setTimeout(() => { delete slot.dataset.lock; next(); }, ok ? 450 : 1100);
+    }));
+  };
+  next();
+  return el;
+}
+// "Pick up where you left off" in Learn.
+function buildCourseCard(data) {
+  const p = state.stats.learn || {};
+  const el = shellCard(data, '🎓 Learn', p.course ? 'Your course' : 'Courses', p.course ? 'Keep your streak going' : 'Learn something new', '#58cc02');
+  const slot = $('.slot', el);
+  const done = p.course ? (p.done?.[p.course] || 0) : 0;
+  const name = p.course ? (MATH_SUBJECTS[p.course] || { oly_nt: 'Olympiad Number Theory', oly_comb: 'Olympiad Combinatorics', oly_alg: 'Olympiad Algebra', oly_geo: 'Olympiad Geometry', oly_mixed: 'Olympiad Mixed' }[p.course]) : null;
+  slot.innerHTML = p.course
+    ? `<p class="hint" style="margin-top:0!important">${escapeHTML(name)} · Unit ${Math.min(5, Math.floor(done / 5) + 1)} · ${done % 5 === 4 ? 'Unit test' : `Lesson ${(done % 5) + 1}`}</p><div class="course-bar big"><i style="width:${(100 * done) / 25}%"></i></div><button class="btn wide go-learn">Continue →</button>`
+    : '<p class="hint" style="margin-top:0!important">Short lessons with lectures, worked examples, boss problems and a memory meter. From prealgebra to the IMO.</p><button class="btn wide go-learn">Pick a course</button>';
+  $('.go-learn', slot).addEventListener('click', () => openLearn(learnCtx));
+  return el;
+}
+function buildGotdCard(data) {
+  const g = GAMES.find((x) => x.id === gameOfDay());
+  const el = shellCard(data, '🎮 Game of the day', '2× XP today', g.name, '#db2777');
+  const slot = $('.slot', el);
+  slot.innerHTML = `<div class="gotd"><span class="gotd-icon">${g.icon}</span><p>${escapeHTML(g.blurb)}</p></div><button class="btn wide play">Play · ${escapeHTML(g.cost)}</button><button class="btn ghost small all">All ${GAMES.length} games</button>`;
+  $('.play', slot).addEventListener('click', () => startGame(g.id, gameCtx));
+  $('.all', slot).addEventListener('click', () => openGames(gameCtx));
+  return el;
+}
+function build24Card(data) {
   const el = h(`<section class="card s-game" data-id="${escapeHTML(data.id)}"><div class="card-inner">
       <div class="meta"><span class="pill">Mini-game</span><span class="where">Quick break</span></div>
       <h2 class="heading">Quick 24</h2>
