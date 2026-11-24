@@ -1,4 +1,4 @@
-import { SOURCES, PROBLEM_TOPICS, escapeHTML, textToHtml, answerFor, searchAll } from './sources.js';
+import { SOURCES, PROBLEM_TOPICS, escapeHTML, textToHtml, answerFor, searchAll, dailyChallenge } from './sources.js';
 import { renderContent } from './render.js';
 
 // Where shared post links point. On the website it's the site itself; inside the iOS app it's the public site.
@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS = {
   personalise: true,
   dailyGoal: 5,
   theme: 'system',
+  daily: true,
 };
 
 const savedSettings = store.get('settings', {});
@@ -41,7 +42,8 @@ const state = {
   pending: 0,
   failures: {},
   generation: 0,
-  pinned: null, // a shared post opened from a link, shown first
+  pins: [], // cards shown first: a post opened from a link, today's daily challenge
+  badges: store.get('badges', {}),
 };
 state.settings.sources = { ...DEFAULT_SETTINGS.sources, ...state.settings.sources };
 state.settings.weights = { ...DEFAULT_SETTINGS.weights, ...state.settings.weights };
@@ -63,6 +65,7 @@ function markSeen(id) {
     saveStats();
   }
   state.seen.add(id);
+  if (state.seen.size % 50 === 0 || state.seen.size === 100) checkBadges();
   if (state.seen.size > 4000) state.seen = new Set([...state.seen].slice(-3000));
   store.set('seen', [...state.seen]);
 }
@@ -89,6 +92,36 @@ function weightFor(source) {
   if (!state.settings.personalise) return base;
   const score = state.engagement[source] || 0;
   return base * Math.max(0.4, Math.min(3, 1 + score / 25));
+}
+
+// ------------------------------------------------------------------ badges
+const BADGES = [
+  { id: 'solve1', name: 'First solve', desc: 'Solve a problem', test: () => state.stats.correct >= 1 },
+  { id: 'solve10', name: 'Warmed up', desc: 'Solve 10 problems', test: () => state.stats.correct >= 10 },
+  { id: 'solve50', name: 'Problem crusher', desc: 'Solve 50 problems', test: () => state.stats.correct >= 50 },
+  { id: 'solve200', name: 'Mathlete', desc: 'Solve 200 problems', test: () => state.stats.correct >= 200 },
+  { id: 'run5', name: 'On a roll', desc: '5 correct in a row', test: () => state.stats.best >= 5 },
+  { id: 'run15', name: 'Unstoppable', desc: '15 correct in a row', test: () => state.stats.best >= 15 },
+  { id: 'days3', name: 'Habit', desc: '3-day streak', test: () => dayStreak() >= 3 },
+  { id: 'days7', name: 'Week of maths', desc: '7-day streak', test: () => dayStreak() >= 7 },
+  { id: 'days30', name: 'Devoted', desc: '30-day streak', test: () => dayStreak() >= 30 },
+  { id: 'seen100', name: 'Explorer', desc: 'See 100 cards', test: () => state.seen.size >= 100 },
+  { id: 'seen1000', name: 'Voyager', desc: 'See 1,000 cards', test: () => state.seen.size >= 1000 },
+  { id: 'daily1', name: 'Daily solver', desc: 'Solve a daily challenge', test: () => (state.stats.dailySolved || 0) >= 1 },
+  { id: 'daily7', name: 'Daily devotee', desc: '7 daily challenges in a row', test: () => (state.stats.dailyBest || 0) >= 7 },
+  { id: 'seq1', name: 'Pattern spotter', desc: 'Guess the next term of a sequence', test: () => (state.stats.seqRight || 0) >= 1 },
+  { id: 'post1', name: 'Author', desc: 'Write a post', test: () => state.posts.length >= 1 },
+  { id: 'save10', name: 'Collector', desc: 'Save 10 cards', test: () => state.saved.length >= 10 },
+];
+function checkBadges() {
+  let fresh = null;
+  for (const b of BADGES) {
+    if (!state.badges[b.id] && b.test()) { state.badges[b.id] = today(); fresh = b; }
+  }
+  if (fresh) {
+    store.set('badges', state.badges);
+    setTimeout(() => toast(`Badge unlocked: ${fresh.name}`), 900);
+  }
 }
 
 // ------------------------------------------------------------------ theme
@@ -271,7 +304,7 @@ function resetFeed() {
   feed.innerHTML = '';
   feed.appendChild(loaderEl());
   feed.scrollTop = 0;
-  if (state.pinned) appendCard(state.pinned);
+  state.pins.forEach(appendCard);
   fill();
 }
 
@@ -322,13 +355,13 @@ const metaFor = (d) => {
 const isProblem = (d) => ['contest', 'aops', 'olympiad'].includes(d.source) || (d.source === 'post' && d.postKind === 'problem');
 const inList = (key, id) => state[key].some((s) => s.id === id);
 
-function buildCard(data, { standalone = false, pinned = false } = {}) {
+function buildCard(data, { standalone = false } = {}) {
   const meta = metaFor(data);
   const isSaved = inList('saved', data.id);
   const isLiked = inList('liked', data.id);
   const el = h(`<section class="card ${meta.cls}" data-id="${escapeHTML(data.id)}">
     <div class="card-inner">
-      ${pinned ? '<div class="shared-banner">Shared with you</div>' : ''}
+      ${data.banner ? `<div class="shared-banner">${escapeHTML(data.banner)}</div>` : ''}
       <div class="meta"><span class="pill">${escapeHTML(meta.tag)}</span><span class="where">${escapeHTML(meta.from)}</span></div>
       <h2 class="heading">${escapeHTML(data.heading)}</h2>
       <div class="content"></div>
@@ -349,13 +382,7 @@ function buildCard(data, { standalone = false, pinned = false } = {}) {
   } catch (e) {
     content.innerHTML = '<p>Couldn’t display this one.</p>';
   }
-  if (data.terms && data.terms.length) {
-    const terms = h(`<div class="terms" aria-label="First terms"></div>`);
-    data.terms.forEach((t, i) => terms.appendChild(h(`<span style="--i:${i}">${escapeHTML(t)}</span>`)));
-    terms.appendChild(h('<span class="ellipsis">…</span>'));
-    content.appendChild(terms);
-    content.appendChild(h('<p class="hint">What comes next — and why?</p>'));
-  }
+  if (data.terms && data.terms.length) content.appendChild(termsGame(data, el));
   if (isProblem(data)) content.appendChild(answerBox(data, el));
 
   $('.like', el).addEventListener('click', (e) => toggleList('liked', data, e.currentTarget));
@@ -371,6 +398,51 @@ function buildCard(data, { standalone = false, pinned = false } = {}) {
   requestAnimationFrame(checkOverflow);
   el._checkOverflow = checkOverflow;
   return el;
+}
+
+// Show the first terms of a sequence and let the person guess the next one.
+function termsGame(data, cardEl) {
+  const wrap = h('<div></div>');
+  const all = data.terms;
+  const k = Math.min(10, all.length - 1);
+  const terms = h(`<div class="terms" aria-label="First terms"></div>`);
+  all.slice(0, k).forEach((t, i) => terms.appendChild(h(`<span style="--i:${i}">${escapeHTML(t)}</span>`)));
+  const blank = h('<span class="blank">?</span>');
+  terms.appendChild(blank);
+  wrap.appendChild(terms);
+  const form = h(`<form class="numeric guess"><input inputmode="numeric" maxlength="24" placeholder="Next term?" aria-label="Guess the next term" autocomplete="off"><button class="btn" type="submit">Check</button><button class="btn ghost giveup" type="button">Show</button></form>`);
+  const reveal = (ok, gaveUp) => {
+    form.querySelectorAll('input, button').forEach((x) => { x.disabled = true; });
+    blank.textContent = all[k];
+    blank.className = ok ? 'right' : 'revealed';
+    all.slice(k + 1).forEach((t, i) => terms.appendChild(h(`<span style="--i:${i}">${escapeHTML(t)}</span>`)));
+    terms.appendChild(h('<span class="ellipsis">…</span>'));
+    if (!gaveUp) {
+      state.stats.seqTried = (state.stats.seqTried || 0) + 1;
+      if (ok) state.stats.seqRight = (state.stats.seqRight || 0) + 1;
+      saveStats();
+      engage('oeis', ok ? 2 : 1);
+      checkBadges();
+    }
+    const fb = h(`<div class="feedback ${ok ? 'ok' : 'no'}">${ok ? 'Spot on!' : gaveUp ? 'Here’s how it continues.' : `Not quite — it’s <b>${escapeHTML(all[k])}</b>.`} <button class="link">Why?</button></div>`);
+    fb.querySelector('.link').addEventListener('click', () => openSolution(data));
+    wrap.appendChild(fb);
+    if (ok) burst(wrap);
+    requestAnimationFrame(() => cardEl._checkOverflow?.());
+  };
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = form.querySelector('input');
+    const v = input.value.trim().replace(/^\+/, '').replace(/[,\s]/g, '');
+    if (!/^-?\d+$/.test(v)) { input.classList.add('shake'); setTimeout(() => input.classList.remove('shake'), 400); return; }
+    input.blur();
+    const ok = v.replace(/^(-?)0+(?=\d)/, '$1') === all[k];
+    input.classList.add(ok ? 'right' : 'wrong');
+    reveal(ok, false);
+  });
+  form.querySelector('.giveup').addEventListener('click', () => reveal(false, true));
+  wrap.appendChild(form);
+  return wrap;
 }
 
 // Double-tap anywhere on a card to like it.
@@ -435,12 +507,35 @@ function answerBox(data, cardEl) {
       state.stats.streak = 0;
       engage(data.source, 1);
     }
+    if (data.daily && !d.dailyDone) {
+      d.dailyDone = true;
+      if (ok) {
+        const y = new Date(); y.setDate(y.getDate() - 1);
+        const yd = state.days[y.toLocaleDateString('en-CA')];
+        state.stats.dailyStreak = yd?.dailySolved ? (state.stats.dailyStreak || 0) + 1 : 1;
+        state.stats.dailyBest = Math.max(state.stats.dailyBest || 0, state.stats.dailyStreak);
+        state.stats.dailySolved = (state.stats.dailySolved || 0) + 1;
+        d.dailySolved = true;
+      } else {
+        state.stats.dailyStreak = 0;
+      }
+      state.pins = state.pins.filter((p) => !p.daily);
+    }
     saveStats();
     updateStreak(ok);
-    if (ok && d.solved === state.settings.dailyGoal) setTimeout(() => toast(`Daily goal reached — ${d.solved} solved today!`), 700);
+    checkBadges();
+    if (data.daily) setTimeout(() => toast(ok ? `Daily challenge solved! Daily streak: ${state.stats.dailyStreak}` : 'Daily challenge done — new one tomorrow'), 600);
+    else if (ok && d.solved === state.settings.dailyGoal) setTimeout(() => toast(`Daily goal reached — ${d.solved} solved today!`), 700);
     cardEl.classList.add(ok ? 'solved' : 'missed');
     const fb = h(`<div class="feedback ${ok ? 'ok' : 'no'}">${ok ? 'Correct!' : `Not quite — the answer is <b>${escapeHTML(data.answer.value)}</b>.`}${data.solutionHtml ? ' <button class="link">See solution</button>' : ''}</div>`);
     fb.querySelector('.link')?.addEventListener('click', () => openSolution(data));
+    if (data.daily) {
+      const brag = h('<button class="link brag">Share result</button>');
+      brag.addEventListener('click', () => shareText(ok
+        ? `I solved today's MathScroll daily challenge! Daily streak: ${state.stats.dailyStreak}. Can you?`
+        : `Today's MathScroll daily challenge got me. Can you solve it?`));
+      fb.append(' · ', brag);
+    }
     box.appendChild(fb);
     if (ok) burst(box);
     requestAnimationFrame(() => cardEl._checkOverflow?.());
@@ -503,7 +598,7 @@ function updateStreak(pulse) {
 }
 
 function appendCard(data) {
-  const el = buildCard(data, { pinned: data === state.pinned });
+  const el = buildCard(data);
   state.cards.push({ data, el });
   const loader = $('#loader');
   // If the person is sitting on the loading card, move them onto the new card
@@ -524,9 +619,17 @@ function toggleList(key, data, btn) {
   saveList(key);
   if (on) engage(data.source, key === 'liked' ? 3 : 2); else engage(data.source, key === 'liked' ? -3 : -2);
   if (key === 'saved') toast(on ? 'Saved' : 'Removed from saved');
+  if (on) checkBadges();
   const cls = key === 'liked' ? '.like' : '.save';
   document.querySelectorAll(`.card[data-id="${CSS.escape(data.id)}"] ${cls}`).forEach((b) => { b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
   if (on && btn) { btn.classList.remove('pop'); void btn.offsetWidth; btn.classList.add('pop'); }
+}
+
+async function shareText(text) {
+  try {
+    if (navigator.share) { await navigator.share({ title: 'MathScroll', text, url: PUBLIC_URL }); return; }
+  } catch (e) { if (e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(`${text} ${PUBLIC_URL}`); toast('Copied — paste it anywhere'); } catch { toast('Couldn’t copy'); }
 }
 
 async function share(data) {
@@ -680,6 +783,12 @@ function openProfile() {
       <div class="week">${week.join('')}</div>
     </div>`));
 
+  const earned = BADGES.filter((b) => state.badges[b.id]).length;
+  body.appendChild(h(`<details class="badges"><summary><b>Badges</b><span>${earned} / ${BADGES.length}</span></summary><div class="badge-grid">${
+    BADGES.map((b) => `<div class="badge ${state.badges[b.id] ? 'earned' : ''}"><span class="medal">${state.badges[b.id] ? '★' : '☆'}</span><b>${escapeHTML(b.name)}</b><small>${escapeHTML(b.desc)}</small></div>`).join('')
+  }</div></details>`));
+  if ((state.stats.dailyStreak || 0) > 0) body.querySelector('.goal-top span').textContent += ` · daily streak ${state.stats.dailyStreak}`;
+
   const tabs = h(`<div class="segmented profile-tabs" role="tablist">
       <button role="tab" data-k="saved">Saved ${state.saved.length}</button>
       <button role="tab" data-k="liked">Liked ${state.liked.length}</button>
@@ -797,6 +906,7 @@ function openCompose() {
     const post = { ...d, n: state.profile.name, d: Date.now(), id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}` };
     state.posts.unshift(post);
     saveList('posts');
+    checkBadges();
     store.set(DRAFT_KEY, { k: kind, t: '', b: '', a: '', s: '' });
     const card = postCard(post);
     openCard(card, 'Your post');
@@ -905,6 +1015,9 @@ function openSettings() {
   const pers = h(`<label class="row"><span><b>Personalise For you</b><small>Show more of what you like, save and solve</small></span><input type="checkbox" class="switch" ${st.personalise ? 'checked' : ''}></label>`);
   pers.querySelector('input').addEventListener('change', (e) => { st.personalise = e.target.checked; saveSettings(); });
   feedGroup.appendChild(pers);
+  const dailyRow = h(`<label class="row"><span><b>Daily challenge</b><small>One AMC/AIME problem a day, the same for everyone</small></span><input type="checkbox" class="switch" ${st.daily ? 'checked' : ''}></label>`);
+  dailyRow.querySelector('input').addEventListener('change', (e) => { st.daily = e.target.checked; saveSettings(); if (!st.daily) state.pins = state.pins.filter((p) => !p.daily); });
+  feedGroup.appendChild(dailyRow);
   const goalRow = h(`<label class="row"><span><b>Daily goal</b><small>Problems to solve each day</small></span><select class="select">${[3, 5, 10, 15, 20].map((n) => `<option ${n === st.dailyGoal ? 'selected' : ''}>${n}</option>`).join('')}</select></label>`);
   goalRow.querySelector('select').addEventListener('change', (e) => { st.dailyGoal = Number(e.target.value); saveSettings(); });
   feedGroup.appendChild(goalRow);
@@ -994,26 +1107,52 @@ async function readSharedPost() {
   if (!m) return;
   try {
     const p = await decodePost(m[1]);
-    state.pinned = postCard(p);
+    const card = { ...postCard(p), banner: 'Shared with you' };
+    state.pins = [card, ...state.pins.filter((x) => x.id !== card.id && !x.banner?.startsWith('Shared'))];
+    state.justShared = true;
   } catch {
     toast('That shared link looks broken');
   }
   history.replaceState(null, '', location.pathname + location.search);
 }
 
+// Today's daily challenge goes right after whatever card is on screen (or first, at the start).
+async function loadDaily() {
+  if (!state.settings.daily || dayRec().dailyDone) return;
+  try {
+    const date = today();
+    const card = { ...(await dailyChallenge(date)), banner: `Daily challenge · ${new Date().toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short' })}` };
+    if (dayRec().dailyDone || state.pins.some((p) => p.daily)) return;
+    state.pins.push(card);
+    if (state.tab !== 'mix') return;
+    const atTop = feed.scrollTop < 10 && currentIndex() === 0 && !state.cards[0]?.data.banner;
+    const idx = atTop ? 0 : Math.min(state.cards.length, currentIndex() + 1);
+    const el = buildCard(card);
+    const before = state.cards[idx]?.el || $('#loader');
+    feed.insertBefore(el, before);
+    state.cards.splice(idx, 0, { data: card, el });
+    observer.observe(el);
+    if (atTop && idx === 0) feed.scrollTo({ top: 0, behavior: 'instant' });
+  } catch (e) {
+    console.warn('[MathScroll] daily challenge unavailable:', e.message);
+  }
+}
+
 async function boot() {
   applyTheme();
   if (state.tab !== 'mix' && !state.settings.sources[state.tab]) state.tab = 'mix';
   await readSharedPost();
-  if (state.pinned) state.tab = 'mix';
+  if (state.justShared) state.tab = 'mix';
   renderTabs();
   updateStreak();
   resetFeed();
-  if (!store.get('onboarded', false) && !state.pinned) setTimeout(openWelcome, 400);
+  if (!store.get('onboarded', false) && !state.justShared) setTimeout(openWelcome, 400);
+  loadDaily();
   window.addEventListener('online', () => { if (errorShown) { state.failures = {}; fill(); } });
   window.addEventListener('hashchange', async () => {
+    state.justShared = false;
     await readSharedPost();
-    if (state.pinned) { closeSheet(); resetFeed(); }
+    if (state.justShared) { closeSheet(); resetFeed(); }
   });
 }
 

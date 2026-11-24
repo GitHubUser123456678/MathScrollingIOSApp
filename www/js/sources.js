@@ -214,6 +214,32 @@ function numinaSource(source) {
   };
 }
 
+// The same AMC/AIME problem for everyone on a given day, picked from the date.
+export async function dailyChallenge(dateStr) {
+  const where = numinaWhere('amc_aime', null);
+  const key = `${NUMINA}|${where}`;
+  let total = totals[key];
+  const url = (offset) => `${HF}/filter?dataset=${encodeURIComponent(NUMINA)}&config=default&split=train&where=${encodeURIComponent(where)}&offset=${offset}&length=1`;
+  if (total == null) {
+    const first = await getJSON(url(0));
+    rememberTotal(key, first.num_rows_total);
+    total = first.num_rows_total;
+  }
+  if (!total) throw new Error('no rows');
+  let seed = 0;
+  for (const ch of `ms-daily-${dateStr}`) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+  for (let i = 0; i < 6; i++) {
+    const data = await getJSON(url((seed + i * 7919) % total));
+    const r = data.rows?.[0];
+    if (!r) continue;
+    const card = numinaCard(r.row, r.row_idx, NUMINA_CFG.amc_aime);
+    if (card.answer && (card.answer.type === 'choice' || card.answer.type === 'numeric')) {
+      return { ...card, id: `daily:${dateStr}`, daily: dateStr, heading: 'Daily challenge' };
+    }
+  }
+  throw new Error('no answerable problem');
+}
+
 const amcAime = numinaSource('amc_aime');
 const aopsForum = numinaSource('aops_forum');
 const olympiad = numinaSource('olympiads');

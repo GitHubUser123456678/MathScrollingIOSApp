@@ -379,3 +379,27 @@ textarea.field { font-family: var(--serif); font-size: 17px; line-height: 1.45; 
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .scrim { background: rgba(0,0,0,.35); } }
 :root[data-theme="light"] .scrim { background: rgba(0,0,0,.35); }
 .numeric input::placeholder { font-family: var(--sans); letter-spacing: 0; font-weight: 500; color: var(--faint); }
+
+/* sequence guessing */
+.terms .blank { min-width: 44px; text-align: center; border-style: dashed; color: var(--accent); font-weight: 700; }
+.terms .right { border-color: var(--ok); color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.terms .revealed { border-color: var(--accent); color: var(--accent); }
+.numeric.guess { max-width: 340px; margin-top: 10px; }
+.numeric.guess .giveup { padding: 0 12px; }
+
+/* badges */
+.badges { background: var(--card-2); border-radius: 14px; padding: 12px 14px; margin-bottom: 16px; }
+.badges summary { display: flex; justify-content: space-between; cursor: pointer; list-style: none; font-size: 14px; }
+.badges summary::-webkit-details-marker { display: none; }
+.badges summary span { color: var(--muted); }
+.badges summary::after { content: "▾"; color: var(--muted); margin-left: 8px; }
+.badges[open] summary::after { content: "▴"; }
+.badges summary b { flex: 1; }
+.badge-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 12px; }
+.badge { display: grid; grid-template-columns: 26px 1fr; column-gap: 8px; align-items: center; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); opacity: .5; }
+.badge.earned { opacity: 1; border-color: color-mix(in srgb, #f5b942 60%, transparent); background: color-mix(in srgb, #f5b942 10%, transparent); }
+.badge .medal { grid-row: span 2; font-size: 20px; color: #f5b942; text-align: center; }
+.badge b { font-size: 13px; }
+.badge small { font-size: 11px; color: var(--muted); }
+.brag { font-size: 15px; }
+.content .btn, .content .feedback, .content .numeric input::placeholder { font-family: var(--sans); }
