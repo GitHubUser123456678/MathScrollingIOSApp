@@ -3,6 +3,8 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 const BASE = (SUPABASE_URL || '').replace(/\/+$/, '');
+// Where links in confirmation and password emails send people: the public website.
+const SITE_URL = location.protocol === 'https:' ? location.origin + location.pathname : 'https://githubuser123456678.github.io/MathScrollingIOSApp/';
 export const cloudEnabled = Boolean(BASE && SUPABASE_ANON_KEY);
 
 const SESSION_KEY = 'ms:session';
@@ -93,7 +95,11 @@ export async function usernameTaken(username) {
 export async function signUp({ email, password, username }) {
   if (!validUsername(username)) throw new Error('Usernames are 3–20 letters, numbers or underscores.');
   if (await usernameTaken(username)) throw new Error('That username is taken.');
-  const data = await request('/auth/v1/signup', { method: 'POST', auth: false, body: { email, password, data: { username, display_name: username } } });
+  const data = await request(`/auth/v1/signup?redirect_to=${encodeURIComponent(SITE_URL)}`, { method: 'POST', auth: false, body: { email, password, data: { username, display_name: username } } });
+  // Supabase answers an already-registered email with a user that has no identities, to avoid leaking who has accounts.
+  if (!data?.access_token && Array.isArray(data?.identities) && data.identities.length === 0) {
+    throw new Error('There’s already an account with that email. Try signing in.');
+  }
   if (data?.access_token) {
     saveSession({ ...data, expires_at: data.expires_at || Math.floor(Date.now() / 1000) + (data.expires_in || 3600) });
     await loadProfile();
@@ -107,6 +113,48 @@ export async function signIn({ email, password }) {
   saveSession({ ...data, expires_at: data.expires_at || Math.floor(Date.now() / 1000) + (data.expires_in || 3600) });
   await loadProfile();
   return currentUser();
+}
+
+// Send the confirmation email again.
+export async function resendConfirmation(email) {
+  await request(`/auth/v1/resend?redirect_to=${encodeURIComponent(SITE_URL)}`, { method: 'POST', auth: false, body: { type: 'signup', email } });
+}
+
+// Email a link for choosing a new password.
+export async function requestPasswordReset(email) {
+  await request(`/auth/v1/recover?redirect_to=${encodeURIComponent(SITE_URL)}`, { method: 'POST', auth: false, body: { email } });
+}
+
+// Set a new password while signed in (used after opening a reset link).
+export async function updatePassword(password) {
+  if (password.length < 6) throw new Error('Password must be at least 6 characters.');
+  await request('/auth/v1/user', { method: 'PUT', body: { password } });
+}
+
+// Links in Supabase emails come back to the site as #access_token=…&type=signup|recovery|magiclink
+// (or #error=…). Sign the person in from that and say what happened.
+export async function handleAuthRedirect() {
+  const hash = location.hash.replace(/^#/, '');
+  if (!/(^|&)(access_token|error_description|error)=/.test(hash)) return null;
+  const params = new URLSearchParams(hash);
+  history.replaceState(null, '', location.pathname + location.search);
+  if (params.get('error') || params.get('error_description')) {
+    const desc = (params.get('error_description') || params.get('error')).replace(/\+/g, ' ');
+    return { error: /expired|invalid/i.test(desc) ? 'That link has expired or was already used. Ask for a new one.' : desc };
+  }
+  const access = params.get('access_token');
+  if (!access || !cloudEnabled) return null;
+  const now = Math.floor(Date.now() / 1000);
+  saveSession({ access_token: access, refresh_token: params.get('refresh_token'), expires_at: Number(params.get('expires_at')) || now + Number(params.get('expires_in') || 3600), user: null });
+  try {
+    const user = await request('/auth/v1/user');
+    saveSession({ ...session, user });
+    await loadProfile();
+  } catch (e) {
+    saveSession(null);
+    return { error: e.message };
+  }
+  return { type: params.get('type') || 'signup', user: currentUser() };
 }
 
 export async function signOut() {
@@ -123,6 +171,24 @@ export async function updateDisplayName(name) {
 
 // Refresh the profile in the background on start.
 if (cloudEnabled && session) ensureFresh().then(loadProfile);
+
+// ------------------------------------------------------------------ your data, kept with your account
+// Stats, saved and liked cards, badges and private posts are stored on the server too,
+// so they're there on any device you sign in on.
+export async function loadUserData() {
+  const u = currentUser();
+  if (!u) return null;
+  const rows = await request(`/rest/v1/user_data?user_id=eq.${u.id}&select=data,updated_at`);
+  return rows?.[0] || null;
+}
+export async function saveUserData(data) {
+  const u = currentUser();
+  if (!u) return;
+  await request('/rest/v1/user_data?on_conflict=user_id', {
+    method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
+    body: { user_id: u.id, data, updated_at: new Date().toISOString() },
+  });
+}
 
 // ------------------------------------------------------------------ posts
 const POST_SELECT = 'select=id,user_id,kind,title,body,answer,solution,topic,difficulty,like_count,comment_count,created_at,profiles(username,display_name)';

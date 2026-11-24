@@ -123,3 +123,19 @@ end;
 $$;
 drop trigger if exists comments_counter on public.comments;
 create trigger comments_counter after insert or delete on public.comments for each row execute function public.count_comments();
+
+-- ---------------------------------------------------------------- your data, kept with your account
+-- Stats, saved/liked cards, badges and private posts, so they follow you to any device. Only you can read or write yours.
+create table if not exists public.user_data (
+  user_id uuid primary key default auth.uid() references auth.users on delete cascade,
+  data jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now(),
+  check (pg_column_size(data) < 2000000)
+);
+alter table public.user_data enable row level security;
+drop policy if exists "read own data" on public.user_data;
+create policy "read own data" on public.user_data for select using (auth.uid() = user_id);
+drop policy if exists "insert own data" on public.user_data;
+create policy "insert own data" on public.user_data for insert with check (auth.uid() = user_id);
+drop policy if exists "update own data" on public.user_data;
+create policy "update own data" on public.user_data for update using (auth.uid() = user_id) with check (auth.uid() = user_id);

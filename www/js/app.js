@@ -13,7 +13,9 @@ const store = {
     try { const v = localStorage.getItem('ms:' + key); return v == null ? fallback : JSON.parse(v); } catch { return fallback; }
   },
   set(key, value) {
-    try { localStorage.setItem('ms:' + key, JSON.stringify(value)); return true; } catch { return false; }
+    try { localStorage.setItem('ms:' + key, JSON.stringify(value)); } catch { return false; }
+    onStoreChange(key);
+    return true;
   },
 };
 
@@ -915,6 +917,64 @@ function openCard(data, title) {
   markSeen(data.id);
 }
 
+// ------------------------------------------------------------------ account sync
+// Signed-in people keep their stats, saves, likes, badges and private posts on the server.
+const SYNC_KEYS = new Set(['saved', 'liked', 'posts', 'stats', 'days', 'badges', 'profile']);
+let syncTimer = null;
+let syncing = false;
+function onStoreChange(key) {
+  if (!SYNC_KEYS.has(key) || syncing || !cloud.cloudEnabled || !cloud.currentUser()) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(pushSync, 4000);
+}
+function localData() {
+  return { v: 1, saved: state.saved, liked: state.liked, posts: state.posts, stats: state.stats, days: state.days, badges: state.badges, profile: state.profile };
+}
+async function pushSync() {
+  if (!cloud.currentUser()) return;
+  try { await cloud.saveUserData(localData()); state.lastSync = Date.now(); } catch (e) { console.warn('[MathScroll] sync failed:', e.message); }
+}
+const byNewest = (a, b) => (b.savedAt || b.d || 0) - (a.savedAt || a.d || 0);
+function unionById(a = [], b = []) {
+  const seen = new Map();
+  [...a, ...b].forEach((x) => { if (x && x.id && !seen.has(x.id)) seen.set(x.id, x); });
+  return [...seen.values()].sort(byNewest).slice(0, 150);
+}
+function mergeData(server) {
+  if (!server || typeof server !== 'object') return;
+  syncing = true;
+  try {
+    state.saved = unionById(state.saved, server.saved); saveList('saved');
+    state.liked = unionById(state.liked, server.liked); saveList('liked');
+    state.posts = unionById(state.posts, server.posts); saveList('posts');
+    const a = state.stats; const b = server.stats || {};
+    const merged = { ...a };
+    for (const k of ['answered', 'correct', 'best', 'sprintBest', 'dailySolved', 'dailyBest', 'dailyStreak', 'seqTried', 'seqRight']) merged[k] = Math.max(a[k] || 0, b[k] || 0);
+    if ((b.answered || 0) > (a.answered || 0)) {
+      // The other device has more history: take its rating and skill breakdowns.
+      Object.assign(merged, { rating: b.rating ?? a.rating, ratingHistory: b.ratingHistory || a.ratingHistory, byBand: b.byBand || a.byBand, byTopic: b.byTopic || a.byTopic });
+    }
+    state.stats = merged; store.set('stats', state.stats);
+    for (const [d, rec] of Object.entries(server.days || {})) {
+      const mine = state.days[d] || {};
+      state.days[d] = { ...mine, ...rec, seen: Math.max(mine.seen || 0, rec.seen || 0), answered: Math.max(mine.answered || 0, rec.answered || 0), solved: Math.max(mine.solved || 0, rec.solved || 0), dailyDone: mine.dailyDone || rec.dailyDone, dailySolved: mine.dailySolved || rec.dailySolved };
+    }
+    store.set('days', state.days);
+    for (const [id, date] of Object.entries(server.badges || {})) if (!state.badges[id] || date < state.badges[id]) state.badges[id] = date;
+    store.set('badges', state.badges);
+    if (server.profile?.name && state.profile.name === 'Mathlete') { state.profile.name = server.profile.name; store.set('profile', state.profile); }
+  } finally { syncing = false; }
+  updateStreak();
+}
+async function pullSync() {
+  if (!cloud.currentUser()) return;
+  try {
+    const row = await cloud.loadUserData();
+    if (row?.data) mergeData(row.data);
+    await pushSync();
+  } catch (e) { console.warn('[MathScroll] sync failed:', e.message); }
+}
+
 // ------------------------------------------------------------------ community: likes, comments, accounts
 async function toggleCloudLike(data, btn) {
   if (!cloud.currentUser()) { openAuth('Sign in to like posts'); return; }
@@ -985,7 +1045,7 @@ function openComments(data) {
   openSheet(`Comments · ${data.heading}`, body, 'tall');
 }
 
-function openAuth(reason = '', mode = 'signin') {
+function openAuth(reason = '', mode = 'signin', prefillEmail = '') {
   const body = document.createElement('div');
   body.className = 'auth';
   body.innerHTML = `
@@ -993,31 +1053,54 @@ function openAuth(reason = '', mode = 'signin') {
     <div class="segmented auth-tabs"><button data-m="signin">Sign in</button><button data-m="signup">Create account</button></div>
     <form class="auth-form">
       <input class="field username" name="username" autocomplete="username" placeholder="Username (3–20 letters, numbers, _)" maxlength="20">
-      <input class="field email" type="email" name="email" autocomplete="email" placeholder="Email" required>
+      <input class="field email" type="email" name="email" autocomplete="email" placeholder="Email" required value="${escapeHTML(prefillEmail)}">
       <input class="field password" type="password" name="password" autocomplete="current-password" placeholder="Password (6+ characters)" minlength="6" required>
       <p class="auth-error" hidden></p>
+      <button class="btn ghost small resend" type="button" hidden>Resend confirmation email</button>
       <button class="btn wide submit" type="submit"></button>
+      <button class="link forgot" type="button">Forgot password?</button>
     </form>
-    <p class="small">Your username is shown on your posts and comments. Your email is never shown to anyone.</p>`;
+    <p class="small">Your account is kept on the server, with your stats, saves and posts, so you can sign in on any device. Your username is shown on posts and comments; your email is never shown.</p>`;
+  const $$ = (sel) => $(sel, body);
+  const showMsg = (text, ok = false) => { const e = $$('.auth-error'); e.hidden = false; e.classList.toggle('ok', ok); e.textContent = text; };
   const setMode = (m) => {
     mode = m;
     body.querySelectorAll('.auth-tabs button').forEach((b) => b.setAttribute('aria-checked', b.dataset.m === m));
-    $('.username', body).hidden = m !== 'signup';
-    $('.username', body).required = m === 'signup';
-    $('.password', body).autocomplete = m === 'signup' ? 'new-password' : 'current-password';
-    $('.submit', body).textContent = m === 'signup' ? 'Create account' : 'Sign in';
-    $('.auth-error', body).hidden = true;
+    $$('.username').hidden = m !== 'signup';
+    $$('.username').required = m === 'signup';
+    $$('.password').autocomplete = m === 'signup' ? 'new-password' : 'current-password';
+    $$('.submit').textContent = m === 'signup' ? 'Create account' : 'Sign in';
+    $$('.forgot').hidden = m !== 'signin';
+    $$('.auth-error').hidden = true;
+    $$('.resend').hidden = true;
   };
+  // Resend with a cooldown so people don't hit Supabase's email limit.
+  const resend = $$('.resend');
+  const cooldown = (btn, secs, label) => {
+    btn.disabled = true;
+    const tick = () => { if (secs <= 0) { btn.disabled = false; btn.textContent = label; return; } btn.textContent = `${label} (${secs--}s)`; setTimeout(tick, 1000); };
+    tick();
+  };
+  resend.addEventListener('click', async () => {
+    const email = $$('.email').value.trim();
+    if (!email) { showMsg('Type your email first.'); return; }
+    try { await cloud.resendConfirmation(email); showMsg(`Sent again to ${email}. Check your inbox and spam folder.`, true); cooldown(resend, 60, 'Resend confirmation email'); } catch (e) { showMsg(e.message); }
+  });
+  $$('.forgot').addEventListener('click', async () => {
+    const email = $$('.email').value.trim();
+    if (!email) { showMsg('Type your email above, then tap “Forgot password?” again.'); $$('.email').focus(); return; }
+    try { await cloud.requestPasswordReset(email); showMsg(`If there’s an account for ${email}, a link to set a new password is on its way.`, true); } catch (e) { showMsg(e.message); }
+  });
   body.querySelectorAll('.auth-tabs button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.m)));
-  $('.auth-form', body).addEventListener('submit', async (e) => {
+  $$('.auth-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const err = $('.auth-error', body); const btn = $('.submit', body);
-    const email = $('.email', body).value.trim(); const password = $('.password', body).value; const username = $('.username', body).value.trim();
-    btn.disabled = true; err.hidden = true;
+    const btn = $$('.submit');
+    const email = $$('.email').value.trim(); const password = $$('.password').value; const username = $$('.username').value.trim();
+    btn.disabled = true; $$('.auth-error').hidden = true;
     try {
       if (mode === 'signup') {
         const r = await cloud.signUp({ email, password, username });
-        if (r.needsConfirm) { err.hidden = false; err.classList.add('ok'); err.textContent = 'Almost done — open the confirmation email we sent, then come back and sign in.'; setMode('signin'); err.hidden = false; btn.disabled = false; return; }
+        if (r.needsConfirm) { btn.disabled = false; showCheckEmail(email); return; }
       } else {
         await cloud.signIn({ email, password });
       }
@@ -1025,13 +1108,51 @@ function openAuth(reason = '', mode = 'signin') {
       toast(`Signed in as @${u?.username || 'you'}`);
       closeSheet();
       renderTabs();
+      pullSync();
     } catch (ex) {
-      err.classList.remove('ok'); err.hidden = false; err.textContent = ex.message;
+      showMsg(ex.message);
+      if (/confirm your email/i.test(ex.message)) resend.hidden = false;
     }
     btn.disabled = false;
   });
+  // After sign-up: tell them to confirm, with a resend button.
+  const showCheckEmail = (email) => {
+    body.innerHTML = `<div class="check-email">
+      <div class="envelope">✉</div>
+      <h3>Check your email</h3>
+      <p>We sent a confirmation link to <b>${escapeHTML(email)}</b>. Tap it to finish creating your account — it signs you in automatically.</p>
+      <p class="small">Can’t find it? Look in spam or promotions. Using the iPhone app? The link opens in Safari; once it says you’re confirmed, come back here and sign in.</p>
+      <button class="btn ghost wide resend2">Resend email</button>
+      <button class="btn wide go-signin">I’ve confirmed — sign in</button>
+      <p class="auth-error" hidden></p></div>`;
+    const r2 = $$('.resend2');
+    cooldown(r2, 60, 'Resend email');
+    r2.addEventListener('click', async () => {
+      try { await cloud.resendConfirmation(email); toast('Sent again'); cooldown(r2, 60, 'Resend email'); } catch (err) { showMsg(err.message); }
+    });
+    $$('.go-signin').addEventListener('click', () => openAuth('', 'signin', email));
+    $('#sheetTitle').textContent = 'Confirm your email';
+  };
   setMode(mode);
   openSheet(mode === 'signup' ? 'Create account' : 'Sign in', body);
+}
+
+// After opening a password-reset link.
+function openNewPassword() {
+  const body = document.createElement('div');
+  body.className = 'auth';
+  body.innerHTML = `<p class="auth-reason">Choose a new password for @${escapeHTML(cloud.currentUser()?.username || '')}.</p>
+    <form class="auth-form"><input class="field p1" type="password" autocomplete="new-password" placeholder="New password (6+ characters)" minlength="6" required>
+    <input class="field p2" type="password" autocomplete="new-password" placeholder="Type it again" minlength="6" required>
+    <p class="auth-error" hidden></p><button class="btn wide" type="submit">Save new password</button></form>`;
+  $('form', body).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = $('.auth-error', body);
+    const a = $('.p1', body).value; const b = $('.p2', body).value;
+    if (a !== b) { err.hidden = false; err.textContent = 'Those don’t match.'; return; }
+    try { await cloud.updatePassword(a); toast('Password updated'); closeSheet(); } catch (ex) { err.hidden = false; err.textContent = ex.message; }
+  });
+  openSheet('New password', body);
 }
 
 // ------------------------------------------------------------------ profile
@@ -1061,9 +1182,9 @@ function openProfile() {
   if (cloud.cloudEnabled) {
     const u = cloud.currentUser();
     const acct = h(u
-      ? `<div class="account"><span>Signed in as <b>@${escapeHTML(u.username || '')}</b></span><button class="btn ghost small sign-out">Sign out</button></div>`
+      ? `<div class="account"><span>Signed in as <b>@${escapeHTML(u.username || '')}</b><small class="sync-note">Stats, saves and posts are backed up to your account${state.lastSync ? ' · synced' : ''}</small></span><button class="btn ghost small sign-out">Sign out</button></div>`
       : `<div class="account"><span>Sign in to post publicly, like and comment.</span><button class="btn small sign-in">Sign in</button></div>`);
-    acct.querySelector('.sign-out')?.addEventListener('click', async () => { await cloud.signOut(); toast('Signed out'); openProfile(); renderTabs(); });
+    acct.querySelector('.sign-out')?.addEventListener('click', async () => { clearTimeout(syncTimer); await pushSync(); await cloud.signOut(); toast('Signed out'); openProfile(); renderTabs(); });
     acct.querySelector('.sign-in')?.addEventListener('click', () => openAuth());
     body.appendChild(acct);
     if (u) {
@@ -1700,15 +1821,28 @@ async function loadDaily() {
 async function boot() {
   applyTheme();
   if (state.tab !== 'mix' && !state.settings.sources[state.tab]) state.tab = 'mix';
+  const auth = cloud.cloudEnabled ? await cloud.handleAuthRedirect() : null;
   await readSharedPost();
   if (state.justShared) state.tab = 'mix';
   renderTabs();
   updateStreak();
   resetFeed();
-  if (!store.get('onboarded', false) && !state.justShared) setTimeout(openWelcome, 400);
+  if (auth?.error) setTimeout(() => { toast(auth.error); openAuth(auth.error); }, 500);
+  else if (auth?.type === 'recovery') setTimeout(openNewPassword, 500);
+  else if (auth?.user) setTimeout(() => toast(`Email confirmed — welcome, @${auth.user.username || 'you'}!`), 500);
+  if (!store.get('onboarded', false) && !state.justShared && !auth) setTimeout(openWelcome, 400);
   loadDaily();
+  if (cloud.currentUser()) pullSync();
+  document.addEventListener('visibilitychange', () => { if (document.hidden && cloud.currentUser()) { clearTimeout(syncTimer); pushSync(); } });
   window.addEventListener('online', () => { if (errorShown) { state.failures = {}; fill(); } });
   window.addEventListener('hashchange', async () => {
+    if (cloud.cloudEnabled && /access_token=|error_description=/.test(location.hash)) {
+      const r = await cloud.handleAuthRedirect();
+      if (r?.error) { toast(r.error); openAuth(r.error); }
+      else if (r?.type === 'recovery') openNewPassword();
+      else if (r?.user) { closeSheet(); toast(`Email confirmed — welcome, @${r.user.username || 'you'}!`); renderTabs(); pullSync(); }
+      return;
+    }
     state.justShared = false;
     await readSharedPost();
     if (state.justShared) { closeSheet(); resetFeed(); }
