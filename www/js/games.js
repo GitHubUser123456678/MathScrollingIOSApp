@@ -3,8 +3,11 @@
 
 const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
 const rnd = (n) => Math.floor(Math.random() * n);
+import { initial as chessStart, legal as chessLegal, make as chessMake, status as chessStatus, inCheck as chessInCheck, bestMove, LEVELS as CHESS_LEVELS, san as chessSan } from './chess.js';
 
 export const GAMES = [
+  { id: 'blockblast', name: 'Block Blast', icon: '🧱', blurb: 'Drop blocks, clear rows and columns. Out of room? Solve a problem to keep going.' },
+  { id: 'chess', name: 'Chess', icon: '♞', blurb: 'Play the computer. Spend ⚡ on hints and take-backs.' },
   { id: 'sumblast', name: 'Sum Blast', icon: '💥', blurb: 'Drag through tiles that add up to the target. 90 seconds.' },
   { id: 'g24', name: '24', icon: '🎯', blurb: 'Use all four numbers with + − × ÷ to make 24.' },
   { id: 'queens', name: 'Queens', icon: '♛', blurb: 'Place N queens so no two attack each other.' },
@@ -16,12 +19,12 @@ export function openGames(ctx) {
   const best = ctx.bests();
   const body = el(`<div class="games-hub">${GAMES.map((g) => `
     <button class="game-tile" data-g="${g.id}"><span class="g-icon">${g.icon}</span><span class="g-text"><b>${g.name}</b><small>${g.blurb}</small>${best[g.id] ? `<em>Best: ${ctx.bestLabel(g.id, best[g.id])}</em>` : ''}</span></button>`).join('')}
-    <p class="small">Every game earns XP. Your best scores are kept in your profile.</p></div>`);
+    <p class="small">Every game earns XP. Solve problems to earn ⚡ (you have <b>${ctx.charges()}</b>) for power-ups, hints and second chances.</p></div>`);
   body.querySelectorAll('.game-tile').forEach((b) => b.addEventListener('click', () => startGame(b.dataset.g, ctx)));
   ctx.openSheet('Games', body, 'tall');
 }
 export function startGame(id, ctx) {
-  ({ sumblast: sumBlast, g24: game24, queens, rush })[id](ctx);
+  ({ blockblast: blockBlast, chess, sumblast: sumBlast, g24: game24, queens, rush })[id](ctx);
 }
 
 // ------------------------------------------------------------------ Sum Blast
@@ -348,4 +351,350 @@ function showResult(body, ctx, { title, big, unit, line, again, againLabel, shar
   body.querySelector('.again').addEventListener('click', again);
   body.querySelector('.share-g').addEventListener('click', () => ctx.shareText(share));
   body.querySelector('.more-g').addEventListener('click', () => openGames(ctx));
+}
+
+// ------------------------------------------------------------------ problems inside games
+// Shows a real problem over the game. Resolves true/false when answered, null if cancelled.
+export function askProblem(ctx, { title, reason }) {
+  return new Promise((resolve) => {
+    const ov = el(`<div class="g-problem"><div class="gp-head"><b>${title}</b><button class="btn ghost small gp-x">Cancel</button></div><p class="small gp-why">${reason}</p><div class="gp-body sprint-stage"><p class="loader-msg">Finding a problem…</p></div></div>`);
+    document.body.appendChild(ov);
+    let answered = false;
+    const close = () => ov.remove();
+    ov.querySelector('.gp-x').addEventListener('click', () => { close(); if (!answered) resolve(null); });
+    ctx.problem(ov.querySelector('.gp-body')).then((ok) => {
+      answered = true;
+      resolve(ok);
+      const x = ov.querySelector('.gp-x'); x.textContent = 'Continue'; x.classList.remove('ghost');
+      if (ok) setTimeout(close, 1300);
+    }, () => { ov.querySelector('.gp-body').innerHTML = '<p class="loader-msg">Couldn’t load a problem. Check your connection.</p>'; });
+  });
+}
+const chargePill = (ctx) => `<button class="g-charge" title="⚡ charges — solve a problem to earn one">⚡ <b>${ctx.charges()}</b> <span>+</span></button>`;
+function wireCharge(body, ctx) {
+  const refresh = () => body.querySelectorAll('.g-charge b').forEach((b) => { b.textContent = ctx.charges(); });
+  body.querySelectorAll('.g-charge').forEach((b) => b.addEventListener('click', async () => {
+    const ok = await askProblem(ctx, { title: 'Earn ⚡', reason: 'Solve this problem to earn a charge.' });
+    refresh();
+    if (ok) ctx.toast('+1 ⚡');
+  }));
+  return refresh;
+}
+function spend(ctx, refresh, what) {
+  if (ctx.spend(1)) { refresh(); return true; }
+  ctx.toast(`${what} costs 1 ⚡ — tap ⚡ to solve a problem and earn one`);
+  return false;
+}
+
+// ------------------------------------------------------------------ Block Blast
+const SHAPES = [
+  [[0, 0]], [[0, 0], [0, 1]], [[0, 0], [1, 0]], [[0, 0], [0, 1], [0, 2]], [[0, 0], [1, 0], [2, 0]],
+  [[0, 0], [0, 1], [0, 2], [0, 3]], [[0, 0], [1, 0], [2, 0], [3, 0]], [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]], [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]],
+  [[0, 0], [0, 1], [1, 0], [1, 1]], [[0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2], [2, 0], [2, 1], [2, 2]],
+  [[0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2]], [[0, 0], [0, 1], [1, 0], [1, 1], [2, 0], [2, 1]],
+  [[0, 0], [1, 0], [1, 1]], [[0, 0], [0, 1], [1, 0]], [[0, 0], [0, 1], [1, 1]], [[0, 1], [1, 0], [1, 1]],
+  [[0, 0], [1, 0], [2, 0], [2, 1]], [[0, 0], [0, 1], [0, 2], [1, 0]], [[0, 0], [0, 1], [1, 1], [2, 1]], [[0, 2], [1, 0], [1, 1], [1, 2]],
+  [[0, 1], [1, 1], [2, 1], [2, 0]], [[0, 0], [1, 0], [1, 1], [1, 2]], [[0, 0], [0, 1], [1, 0], [2, 0]], [[0, 0], [0, 1], [0, 2], [1, 2]],
+  [[0, 0], [0, 1], [0, 2], [1, 1]], [[0, 1], [1, 0], [1, 1], [1, 2]], [[0, 0], [1, 0], [2, 0], [1, 1]], [[0, 1], [1, 1], [2, 1], [1, 0]],
+  [[0, 1], [0, 2], [1, 0], [1, 1]], [[0, 0], [0, 1], [1, 1], [1, 2]], [[0, 0], [1, 0], [1, 1], [2, 1]], [[0, 1], [1, 1], [1, 0], [2, 0]],
+  [[0, 0], [1, 1]], [[0, 1], [1, 0]], [[0, 0], [1, 1], [2, 2]], [[0, 2], [1, 1], [2, 0]],
+];
+const BB_COLORS = ['#f87171', '#fb923c', '#facc15', '#4ade80', '#22d3ee', '#818cf8', '#e879f9'];
+function blockBlast(ctx) {
+  const N = 8;
+  let board = Array.from({ length: N }, () => Array(N).fill(null));
+  let tray = []; let score = 0; let combo = 0; let over = false; let revives = 2; let bombMode = false; let placed = 0;
+  const best = ctx.bests().blockblast || 0;
+  const body = el(`<div class="blockblast">
+    <div class="gb-top"><span class="gb-score">0</span><span class="bb-best">Best ${best}</span>${chargePill(ctx)}</div>
+    <div class="bb-combo"></div>
+    <div class="bb-board"></div>
+    <div class="bb-tray"></div>
+    <div class="gb-actions"><button class="btn ghost small bb-bomb">💣 Bomb · 1⚡</button><button class="btn ghost small bb-reroll">🔄 New pieces · 1⚡</button></div>
+    <p class="small bb-help">Drag a piece onto the board. Fill a whole row or column to clear it.</p></div>`);
+  const refresh = wireCharge(body, ctx);
+  const boardEl = body.querySelector('.bb-board'); const trayEl = body.querySelector('.bb-tray');
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) boardEl.appendChild(el(`<div class="bb-cell" data-r="${r}" data-c="${c}"></div>`));
+  const cellEl = (r, c) => boardEl.children[r * N + c];
+  const fits = (shape, r0, c0) => shape.every(([r, c]) => r0 + r >= 0 && r0 + r < N && c0 + c >= 0 && c0 + c < N && !board[r0 + r][c0 + c]);
+  const fitsAnywhere = (shape) => { for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (fits(shape, r, c)) return true; return false; };
+  const dims = (shape) => [Math.max(...shape.map((x) => x[0])) + 1, Math.max(...shape.map((x) => x[1])) + 1];
+  const drawBoard = () => {
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      const e = cellEl(r, c); const v = board[r][c];
+      e.style.background = v || ''; e.classList.toggle('full', !!v);
+    }
+  };
+  const newTray = () => {
+    for (let tries = 0; tries < 30; tries++) {
+      tray = [0, 1, 2].map(() => ({ shape: SHAPES[rnd(SHAPES.length)], color: BB_COLORS[rnd(BB_COLORS.length)] }));
+      if (tray.some((p) => fitsAnywhere(p.shape))) break;
+    }
+    drawTray();
+  };
+  const pieceHtml = (p, size) => { const [h, w] = dims(p.shape); return `<div class="bb-piece" style="--h:${h};--w:${w};--s:${size}px">${p.shape.map(([r, c]) => `<i style="grid-row:${r + 1};grid-column:${c + 1};background:${p.color}"></i>`).join('')}</div>`; };
+  const drawTray = () => {
+    trayEl.innerHTML = '';
+    tray.forEach((p, i) => {
+      const slot = el(`<div class="bb-slot" data-i="${i}">${p ? pieceHtml(p, 18) : ''}</div>`);
+      if (p && !fitsAnywhere(p.shape)) slot.classList.add('dead');
+      trayEl.appendChild(slot);
+    });
+  };
+  // Lines that would clear if this shape went here.
+  const linesFor = (shape, r0, c0) => {
+    const filled = (r, c) => board[r][c] || shape.some(([a, b]) => r0 + a === r && c0 + b === c);
+    const rows = []; const cols = [];
+    for (let r = 0; r < N; r++) if ([...Array(N).keys()].every((c) => filled(r, c))) rows.push(r);
+    for (let c = 0; c < N; c++) if ([...Array(N).keys()].every((r) => filled(r, c))) cols.push(c);
+    return { rows, cols };
+  };
+  const clearPreview = () => boardEl.querySelectorAll('.bb-ghost, .will-clear').forEach((e) => { e.classList.remove('bb-ghost', 'will-clear'); e.style.removeProperty('--g'); });
+  const place = (i, r0, c0) => {
+    const p = tray[i];
+    p.shape.forEach(([r, c]) => { board[r0 + r][c0 + c] = p.color; });
+    tray[i] = null; placed++;
+    let gained = p.shape.length;
+    const { rows, cols } = linesFor([], 0, 0);
+    const lines = rows.length + cols.length;
+    if (lines) {
+      combo++;
+      const pts = lines * lines * 10 * Math.max(1, combo);
+      gained += pts;
+      const doomed = new Set();
+      rows.forEach((r) => { for (let c = 0; c < N; c++) doomed.add(`${r},${c}`); });
+      cols.forEach((c) => { for (let r = 0; r < N; r++) doomed.add(`${r},${c}`); });
+      doomed.forEach((k) => { const [r, c] = k.split(',').map(Number); cellEl(r, c).classList.add('blast'); board[r][c] = null; });
+      setTimeout(() => boardEl.querySelectorAll('.blast').forEach((e) => e.classList.remove('blast')), 380);
+      ctx.sound(lines >= 2 ? 'crit' : 'correct');
+      const comboEl = body.querySelector('.bb-combo');
+      comboEl.innerHTML = `<b>${lines >= 3 ? 'Incredible!' : lines === 2 ? 'Double!' : 'Clear!'}</b> +${pts}${combo > 1 ? ` · combo ×${combo}` : ''}`;
+      comboEl.classList.remove('show'); void comboEl.offsetWidth; comboEl.classList.add('show');
+      if (board.every((row) => row.every((v) => !v))) { gained += 300; setTimeout(() => ctx.toast('Board cleared! +300'), 300); }
+    } else {
+      ctx.sound('quest');
+      if (placed % 3 === 0) combo = 0; // a combo survives a couple of quiet moves
+    }
+    score += gained;
+    body.querySelector('.gb-score').textContent = score;
+    setTimeout(drawBoard, lines ? 300 : 0); if (!lines) drawBoard();
+    if (tray.every((x) => !x)) newTray(); else drawTray();
+    setTimeout(checkStuck, lines ? 320 : 50);
+  };
+  const checkStuck = () => {
+    if (over) return;
+    drawTray();
+    if (tray.some((p) => p && fitsAnywhere(p.shape))) return;
+    stuck();
+  };
+  const stuck = () => {
+    const panel = el(`<div class="bb-stuck"><b>No room left!</b>
+      ${revives ? `<p>Solve a problem to clear space and keep your ${score} points. (${revives} left)</p><button class="btn wide revive">Solve to continue</button>` : '<p>No second chances left.</p>'}
+      <button class="btn ghost wide end">End game</button></div>`);
+    body.appendChild(panel);
+    panel.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    panel.querySelector('.end').addEventListener('click', () => { panel.remove(); end(); });
+    panel.querySelector('.revive')?.addEventListener('click', async () => {
+      const ok = await askProblem(ctx, { title: 'Second chance', reason: 'Get it right to clear three lines and get fresh pieces.' });
+      refresh();
+      if (ok === null) return;
+      revives--;
+      panel.remove();
+      if (!ok) { ctx.toast('Not quite.'); return stuck(); }
+      // Clear the three fullest rows and give fresh pieces.
+      const fullest = [...Array(N).keys()].sort((a, b) => board[b].filter(Boolean).length - board[a].filter(Boolean).length).slice(0, 3);
+      fullest.forEach((r) => { for (let c = 0; c < N; c++) { board[r][c] = null; cellEl(r, c).classList.add('blast'); } });
+      setTimeout(() => boardEl.querySelectorAll('.blast').forEach((e) => e.classList.remove('blast')), 380);
+      drawBoard(); newTray(); ctx.sound('level'); checkStuck();
+    });
+  };
+  const end = () => {
+    if (over) return;
+    over = true;
+    const xp = Math.min(120, Math.round(score / 15));
+    const isBest = ctx.recordBest('blockblast', score);
+    ctx.gameDone('blockblast', xp);
+    showResult(body, ctx, { title: 'Game over', big: score, unit: 'points', line: `${isBest ? 'New best! ' : ''}+${xp} XP`, again: () => blockBlast(ctx), share: `I scored ${score} in Block Blast on MathScroll. Beat that!` });
+  };
+  // ---- dragging
+  let drag = null;
+  trayEl.addEventListener('pointerdown', (e) => {
+    if (over || bombMode) return;
+    const slot = e.target.closest('.bb-slot'); if (!slot) return;
+    const i = +slot.dataset.i; const p = tray[i]; if (!p) return;
+    e.preventDefault();
+    const cell = boardEl.getBoundingClientRect().width / N;
+    const f = el(`<div class="bb-float">${pieceHtml(p, cell - 3)}</div>`);
+    document.body.appendChild(f);
+    const [h, w] = dims(p.shape);
+    drag = { i, p, f, cell, h, w, slot, pos: null };
+    slot.classList.add('lifted');
+    move(e);
+  });
+  const move = (e) => {
+    if (!drag) return;
+    const { f, cell, h, w } = drag;
+    const x = e.clientX - (w * cell) / 2; const y = e.clientY - h * cell - 40; // float above the finger
+    f.style.transform = `translate(${x}px, ${y}px)`;
+    const b = boardEl.getBoundingClientRect();
+    const c0 = Math.round((x - b.left) / cell); const r0 = Math.round((y - b.top) / cell);
+    clearPreview();
+    if (fits(drag.p.shape, r0, c0)) {
+      drag.pos = [r0, c0];
+      drag.p.shape.forEach(([r, c]) => { const ce = cellEl(r0 + r, c0 + c); ce.classList.add('bb-ghost'); ce.style.setProperty('--g', drag.p.color); });
+      const { rows, cols } = linesFor(drag.p.shape, r0, c0);
+      rows.forEach((r) => { for (let c = 0; c < N; c++) cellEl(r, c).classList.add('will-clear'); });
+      cols.forEach((c) => { for (let r = 0; r < N; r++) cellEl(r, c).classList.add('will-clear'); });
+    } else drag.pos = null;
+  };
+  const up = () => {
+    if (!drag) return;
+    const d = drag; drag = null;
+    d.f.remove(); d.slot.classList.remove('lifted'); clearPreview();
+    if (d.pos) place(d.i, d.pos[0], d.pos[1]);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+  // ---- power-ups
+  body.querySelector('.bb-bomb').addEventListener('click', (e) => {
+    if (over) return;
+    if (bombMode) { bombMode = false; e.currentTarget.classList.remove('on'); return; }
+    if (ctx.charges() < 1) { spend(ctx, refresh, 'A bomb'); return; }
+    bombMode = true; e.currentTarget.classList.add('on'); ctx.toast('Tap a square to blast a 3×3 area');
+  });
+  boardEl.addEventListener('click', (e) => {
+    if (!bombMode || over) return;
+    const t = e.target.closest('.bb-cell'); if (!t) return;
+    if (!spend(ctx, refresh, 'A bomb')) return;
+    bombMode = false; body.querySelector('.bb-bomb').classList.remove('on');
+    const r0 = +t.dataset.r; const c0 = +t.dataset.c;
+    for (let r = r0 - 1; r <= r0 + 1; r++) for (let c = c0 - 1; c <= c0 + 1; c++) if (r >= 0 && r < N && c >= 0 && c < N) { board[r][c] = null; cellEl(r, c).classList.add('blast'); }
+    ctx.sound('crit');
+    setTimeout(() => { boardEl.querySelectorAll('.blast').forEach((x) => x.classList.remove('blast')); drawBoard(); drawTray(); }, 300);
+  });
+  body.querySelector('.bb-reroll').addEventListener('click', () => {
+    if (over || !spend(ctx, refresh, 'New pieces')) return;
+    newTray(); ctx.sound('quest');
+  });
+  newTray(); drawBoard();
+  const stop = () => { over = true; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); drag?.f.remove(); };
+  stop.onReplace = true;
+  ctx.openSheet('Block Blast', body, 'tall', stop);
+  body._test = { board: () => board, tray: () => tray, place, fits };
+}
+
+// ------------------------------------------------------------------ Chess
+const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+const glyph = (p) => `<span class="cp ${p >= 'A' && p <= 'Z' ? 'w' : 'b'}">${GLYPH[p.toLowerCase()]}︎</span>`;
+function chess(ctx, levelIdx = null) {
+  if (levelIdx === null) {
+    const beaten = ctx.bests().chess || 0;
+    const pick = el(`<div class="chess-pick"><p>Choose your opponent. You play white.</p>
+      ${CHESS_LEVELS.map((L, i) => `<button class="game-tile" data-l="${i}"><span class="g-icon">${['♙', '♘', '♗', '♕'][i]}</span><span class="g-text"><b>${L.name}</b><small>Win: +${L.xp} XP</small>${beaten > i ? '<em>Beaten ✓</em>' : ''}</span></button>`).join('')}
+      <p class="small">Stuck? 💡 hints and ↶ take-backs cost 1 ⚡. Earn ⚡ by solving problems (here or in the feed).</p></div>`);
+    pick.querySelectorAll('[data-l]').forEach((b) => b.addEventListener('click', () => chess(ctx, +b.dataset.l)));
+    ctx.openSheet('Chess', pick, 'tall');
+    return;
+  }
+  const L = CHESS_LEVELS[levelIdx];
+  let s = chessStart(); let hist = []; let sans = []; let sel = null; let last = null; let hint = null; let thinking = false; let over = false;
+  const body = el(`<div class="chess">
+    <div class="gb-top"><span class="ch-vs">vs ${L.name}</span><span class="ch-status"></span>${chargePill(ctx)}</div>
+    <div class="ch-cap ch-cap-b"></div>
+    <div class="ch-board"></div>
+    <div class="ch-cap ch-cap-w"></div>
+    <div class="gb-actions"><button class="btn ghost small ch-hint">💡 Hint · 1⚡</button><button class="btn ghost small ch-undo">↶ Take back · 1⚡</button><button class="btn ghost small ch-resign">Resign</button></div>
+    <div class="ch-moves small"></div></div>`);
+  const refresh = wireCharge(body, ctx);
+  const boardEl = body.querySelector('.ch-board');
+  const setStatus = (t) => { body.querySelector('.ch-status').textContent = t; };
+  const captured = () => {
+    const start = { p: 8, n: 2, b: 2, r: 2, q: 1 };
+    const count = (ch) => s.b.filter((x) => x === ch).length;
+    const lost = (white) => Object.keys(start).flatMap((t) => Array(Math.max(0, start[t] - count(white ? t.toUpperCase() : t))).fill(white ? t.toUpperCase() : t));
+    body.querySelector('.ch-cap-b').innerHTML = lost(true).map(glyph).join(''); // white pieces taken by black
+    body.querySelector('.ch-cap-w').innerHTML = lost(false).map(glyph).join('');
+  };
+  const render = () => {
+    boardEl.innerHTML = '';
+    const moves = sel !== null ? chessLegal(s).filter((m) => m.from === sel) : [];
+    const checkSq = chessInCheck(s) ? s.b.indexOf(s.w ? 'K' : 'k') : -1;
+    for (let i = 0; i < 64; i++) {
+      const r = i >> 3; const c = i & 7;
+      const tgt = moves.find((m) => m.to === i);
+      const cls = ['ch-sq', (r + c) % 2 ? 'dark' : 'light', sel === i ? 'ch-sel' : '', last && (last.from === i || last.to === i) ? 'ch-last' : '', tgt ? (s.b[i] !== '.' || tgt.epCap != null ? 'tg-cap' : 'tg-dot') : '', i === checkSq ? 'ch-check' : '', hint && (hint.from === i || hint.to === i) ? 'ch-hintsq' : ''].filter(Boolean).join(' ');
+      const sq = el(`<button class="${cls}" data-i="${i}" aria-label="${'abcdefgh'[c]}${8 - r}">${s.b[i] !== '.' ? glyph(s.b[i]) : ''}${c === 0 ? `<small class="rk">${8 - r}</small>` : ''}${r === 7 ? `<small class="fl">${'abcdefgh'[c]}</small>` : ''}</button>`);
+      boardEl.appendChild(sq);
+    }
+    captured();
+    const pairs = []; for (let k = 0; k < sans.length; k += 2) pairs.push(`${k / 2 + 1}. ${sans[k]}${sans[k + 1] ? ` ${sans[k + 1]}` : ''}`);
+    body.querySelector('.ch-moves').textContent = pairs.slice(-6).join('   ');
+  };
+  const finish = (result) => {
+    over = true;
+    const xp = result === 'win' ? L.xp : result === 'draw' ? Math.round(L.xp / 2) : 5;
+    if (result === 'win') ctx.recordBest('chess', levelIdx + 1); else ctx.recordBest('chess', 0);
+    ctx.gameDone('chess', xp);
+    ctx.sound(result === 'win' ? 'level' : result === 'draw' ? 'quest' : 'wrong');
+    const title = result === 'win' ? 'Checkmate — you win!' : result === 'draw' ? 'Draw' : 'You lost';
+    setTimeout(() => {
+      const panel = el(`<div class="bb-stuck ch-end"><b>${title}</b><p>${sans.length} moves · +${xp} XP</p>
+        ${result === 'win' && levelIdx < CHESS_LEVELS.length - 1 ? `<button class="btn wide next">Play ${CHESS_LEVELS[levelIdx + 1].name}</button>` : '<button class="btn wide next">Play again</button>'}
+        <button class="btn ghost wide share-c">Share</button><button class="btn ghost wide more-g">More games</button></div>`);
+      body.appendChild(panel);
+      panel.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      panel.querySelector('.next').addEventListener('click', () => chess(ctx, result === 'win' ? Math.min(levelIdx + 1, CHESS_LEVELS.length - 1) : levelIdx));
+      panel.querySelector('.share-c').addEventListener('click', () => ctx.shareText(result === 'win' ? `I beat the ${L.name} bot at chess on MathScroll in ${Math.ceil(sans.length / 2)} moves!` : `Playing chess on MathScroll — the ${L.name} bot is tough.`));
+      panel.querySelector('.more-g').addEventListener('click', () => openGames(ctx));
+    }, 700);
+  };
+  const afterMove = () => {
+    const st = chessStatus(s);
+    if (st === 'mate') { setStatus('Checkmate'); render(); finish(s.w ? 'loss' : 'win'); return true; }
+    if (st) { setStatus(st === 'stalemate' ? 'Stalemate' : 'Draw'); render(); finish('draw'); return true; }
+    setStatus(chessInCheck(s) ? 'Check!' : s.w ? 'Your move' : 'Thinking…');
+    return false;
+  };
+  const doMove = (m) => {
+    hist.push(s); sans.push(chessSan(s, m));
+    s = chessMake(s, m); last = m; sel = null; hint = null;
+    ctx.sound(m.cap !== '.' ? 'correct' : 'quest');
+  };
+  const botMove = () => {
+    thinking = true; setStatus('Thinking…'); render();
+    setTimeout(() => {
+      if (over) return;
+      const m = bestMove(s, L.depth, L.noise);
+      thinking = false;
+      if (m) doMove(m);
+      if (!afterMove()) render();
+    }, 350);
+  };
+  boardEl.addEventListener('click', (e) => {
+    const sq = e.target.closest('.ch-sq'); if (!sq || over || thinking || !s.w) return;
+    const i = +sq.dataset.i;
+    if (sel !== null) {
+      const m = chessLegal(s).find((x) => x.from === sel && x.to === i);
+      if (m) { doMove(m); if (!afterMove()) botMove(); else render(); return; }
+    }
+    sel = s.b[i] !== '.' && s.b[i] >= 'A' && s.b[i] <= 'Z' && sel !== i ? i : null;
+    render();
+  });
+  body.querySelector('.ch-hint').addEventListener('click', () => {
+    if (over || thinking || !s.w || !spend(ctx, refresh, 'A hint')) return;
+    setStatus('Finding a good move…');
+    setTimeout(() => { hint = bestMove(s, Math.max(2, Math.min(3, L.depth + 1)), 0); sel = hint ? hint.from : null; setStatus('Try the highlighted move'); render(); }, 50);
+  });
+  body.querySelector('.ch-undo').addEventListener('click', () => {
+    if (over || thinking || hist.length < 2) return;
+    if (!spend(ctx, refresh, 'A take-back')) return;
+    s = hist[hist.length - 2]; hist = hist.slice(0, -2); sans = sans.slice(0, -2); last = null; sel = null; hint = null;
+    setStatus('Your move'); render();
+  });
+  body.querySelector('.ch-resign').addEventListener('click', () => { if (!over && hist.length) finish('loss'); else if (!over) chess(ctx); });
+  setStatus('Your move'); render();
+  const stop = () => { over = true; }; stop.onReplace = true;
+  ctx.openSheet(`Chess · ${L.name}`, body, 'tall', stop);
+  body._test = { state: () => s, setState: (x) => { s = x; render(); } };
 }

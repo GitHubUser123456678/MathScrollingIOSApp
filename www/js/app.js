@@ -134,7 +134,7 @@ const BADGES = [
   { id: 'seq1', name: 'Pattern spotter', desc: 'Guess the next term of a sequence', test: () => (state.stats.seqRight || 0) >= 1 },
   { id: 'post1', name: 'Author', desc: 'Write a post', test: () => state.posts.length >= 1 },
   { id: 'save10', name: 'Collector', desc: 'Save 10 cards', test: () => state.saved.length >= 10 },
-  { id: 'gamer', name: 'Gamer', desc: 'Play all four mini-games', test: () => GAMES.every((g) => (state.stats.games || {})[g.id] != null) },
+  { id: 'gamer', name: 'Gamer', desc: 'Play every mini-game', test: () => GAMES.every((g) => (state.stats.games || {})[g.id] != null) },
   { id: 'maker24', name: 'Twenty-four', desc: 'Solve 10 “make 24” puzzles', test: () => (state.stats.solved24 || 0) >= 10 },
   { id: 'duel1', name: 'Duelist', desc: 'Win a duel', test: () => (state.stats.duelsWon || 0) >= 1 },
   { id: 'level10', name: 'Double digits', desc: 'Reach level 10', test: () => levelFor(state.stats.xp || 0) >= 10 },
@@ -1192,13 +1192,14 @@ function answerBox(data, cardEl, onAnswered = null) {
       state.pins = state.pins.filter((p) => !p.daily);
       cloud.submitDaily(today(), ok).catch(() => {});
     }
+    if (ok) state.stats.charges = Math.min(99, (state.stats.charges || 0) + 1); // ⚡ for the mini-games
     saveStats();
     updateStreak(ok);
     checkBadges();
     if (data.daily) setTimeout(() => toast(ok ? `Daily challenge solved! Daily streak: ${state.stats.dailyStreak}` : 'Daily challenge done — new one tomorrow'), 600);
     else if (ok && d.solved === state.settings.dailyGoal) setTimeout(() => toast(`Daily goal reached — ${d.solved} solved today!`), 700);
     cardEl.classList.add(ok ? 'solved' : 'missed');
-    const fb = h(`<div class="feedback ${ok ? 'ok' : 'no'}">${ok ? 'Correct!' : `Not quite — the answer is <b>${escapeHTML(data.answer.value)}</b>.`}${data.solutionHtml ? ' <button class="link">See solution</button>' : ''}</div>`);
+    const fb = h(`<div class="feedback ${ok ? 'ok' : 'no'}">${ok ? 'Correct! <span class="charge-earned">+1 ⚡</span>' : `Not quite — the answer is <b>${escapeHTML(data.answer.value)}</b>.`}${data.solutionHtml ? ' <button class="link">See solution</button>' : ''}</div>`);
     fb.querySelector('.link')?.addEventListener('click', () => openSolution(data));
     if (data.daily) {
       const brag = h('<button class="link brag">Share result</button>');
@@ -2008,6 +2009,17 @@ async function answerableProblem() {
   }
   throw new Error('no problems');
 }
+// A problem with a checkable answer for games: mostly MATH (shorter), sometimes AMC/AIME.
+async function quickProblem() {
+  for (let i = 0; i < 8; i++) {
+    try {
+      const src = i % 2 === 0 ? SOURCES.math : SOURCES.contest;
+      const c = await src.fetch(fetchSettings());
+      if (c.answer) return c;
+    } catch { /* try again */ }
+  }
+  return answerableProblem();
+}
 function openSprint() {
   if (requireAccount('Ranked sprints')) return;
   const body = document.createElement('div');
@@ -2168,10 +2180,21 @@ function openFilters() {
 }
 
 // ------------------------------------------------------------------ mini-games
-const BEST_LABEL = { sumblast: (v) => `${v} pts`, g24: (v) => `${v} solved`, queens: (v) => `${v}×${v}`, rush: (v) => `${v} correct` };
+const BEST_LABEL = { blockblast: (v) => `${v} pts`, chess: (v) => `Beat ${['Beginner', 'Casual', 'Club', 'Strong'][v - 1]}`, sumblast: (v) => `${v} pts`, g24: (v) => `${v} solved`, queens: (v) => `${v}×${v}`, rush: (v) => `${v} correct` };
 const gameCtx = {
   openSheet: (...a) => openSheet(...a), closeSheet: () => closeSheet(), toast: (m) => toast(m), sound: (k) => sound(k), shareText: (t) => shareText(t),
   bests: () => state.stats.games || {},
+  charges: () => state.stats.charges || 0,
+  spend(n) { if ((state.stats.charges || 0) < n) return false; state.stats.charges -= n; saveStats(); return true; },
+  // Show a real problem in the given box; resolves true/false once answered.
+  async problem(box) {
+    const card = await quickProblem();
+    return new Promise((resolve) => {
+      const el = buildCard(card, { standalone: true, onAnswered: (ok) => resolve(ok) });
+      el.querySelectorAll('.rail, .read-more').forEach((x) => x.remove());
+      box.innerHTML = ''; box.appendChild(el);
+    });
+  },
   bestLabel: (id, v) => BEST_LABEL[id](v),
   recordBest(id, v) {
     const g = (state.stats.games ||= {});
