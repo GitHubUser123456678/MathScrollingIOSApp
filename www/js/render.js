@@ -79,6 +79,22 @@ const MACROS = {
   '\\Cl': '\\operatorname{Cl}',
   '\\Int': '\\operatorname{Int}',
   '\\Bd': '\\partial',
+  '\\d': '\\mathrm d',
+  '\\rd': '\\mathrm d',
+  '\\pr': '\\Pr',
+  '\\expect': '\\operatorname E',
+  '\\var': '\\operatorname{var}',
+  '\\BB': '\\mathbb B',
+  '\\RR': '\\mathbb R',
+  '\\UU': '\\mathbb U',
+  '\\VV': '\\mathbb V',
+  '\\CC': '\\mathbb C',
+  '\\O': '\\varnothing',
+  '\\On': '\\operatorname{On}',
+  '\\cl': '\\operatorname{cl}',
+  '\\leadstoandfrom': '\\leftrightsquigarrow',
+  '\\laptrans': '\\mathcal L\\left\\{#1\\right\\}',
+  '\\fractpart': '\\left\\{#1\\right\\}',
 };
 
 function tex(src, display) {
