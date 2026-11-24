@@ -355,7 +355,7 @@ const metaFor = (d) => {
 const isProblem = (d) => ['contest', 'aops', 'olympiad'].includes(d.source) || (d.source === 'post' && d.postKind === 'problem');
 const inList = (key, id) => state[key].some((s) => s.id === id);
 
-function buildCard(data, { standalone = false } = {}) {
+function buildCard(data, { standalone = false, onAnswered = null } = {}) {
   const meta = metaFor(data);
   const isSaved = inList('saved', data.id);
   const isLiked = inList('liked', data.id);
@@ -383,7 +383,7 @@ function buildCard(data, { standalone = false } = {}) {
     content.innerHTML = '<p>Couldn’t display this one.</p>';
   }
   if (data.terms && data.terms.length) content.appendChild(termsGame(data, el));
-  if (isProblem(data)) content.appendChild(answerBox(data, el));
+  if (isProblem(data)) content.appendChild(answerBox(data, el, onAnswered));
 
   $('.like', el).addEventListener('click', (e) => toggleList('liked', data, e.currentTarget));
   $('.save', el).addEventListener('click', (e) => toggleList('saved', data, e.currentTarget));
@@ -466,7 +466,7 @@ function attachDoubleTap(el, data) {
   });
 }
 
-function answerBox(data, cardEl) {
+function answerBox(data, cardEl, onAnswered = null) {
   const box = h('<div class="answer"></div>');
   if (data.hintHtml) {
     const hint = h('<button class="btn ghost small hint-btn">Hint</button>');
@@ -539,6 +539,7 @@ function answerBox(data, cardEl) {
     box.appendChild(fb);
     if (ok) burst(box);
     requestAnimationFrame(() => cardEl._checkOverflow?.());
+    onAnswered?.(ok);
   };
 
   if (data.answer.type === 'choice') {
@@ -783,6 +784,9 @@ function openProfile() {
       <div class="week">${week.join('')}</div>
     </div>`));
 
+  const sprintBtn = h(`<button class="btn wide sprint-start">Start a 10-problem sprint${state.stats.sprintBest ? ` · best ${state.stats.sprintBest}/10` : ''}</button>`);
+  sprintBtn.addEventListener('click', openSprint);
+  body.appendChild(sprintBtn);
   const earned = BADGES.filter((b) => state.badges[b.id]).length;
   body.appendChild(h(`<details class="badges"><summary><b>Badges</b><span>${earned} / ${BADGES.length}</span></summary><div class="badge-grid">${
     BADGES.map((b) => `<div class="badge ${state.badges[b.id] ? 'earned' : ''}"><span class="medal">${state.badges[b.id] ? '★' : '☆'}</span><b>${escapeHTML(b.name)}</b><small>${escapeHTML(b.desc)}</small></div>`).join('')
@@ -976,6 +980,74 @@ function openSearch(initial = '') {
   showRecent();
   openSheet('Search', body, 'tall');
   if (initial) { input.value = initial; run(); } else setTimeout(() => input.focus(), 300);
+}
+
+// ------------------------------------------------------------------ sprint
+// Ten answerable AMC/AIME problems against the clock.
+const SPRINT_LEN = 10;
+async function answerableProblem() {
+  for (let i = 0; i < 8; i++) {
+    try {
+      const c = await SOURCES.contest.fetch(state.settings);
+      if (c.answer && (c.answer.type === 'choice' || c.answer.type === 'numeric')) return c;
+    } catch { /* try again */ }
+  }
+  throw new Error('no problems');
+}
+function openSprint() {
+  const body = document.createElement('div');
+  body.className = 'sprint';
+  body.innerHTML = `<div class="sprint-bar"><span class="sprint-count">1 / ${SPRINT_LEN}</span><span class="sprint-time">0:00</span><button class="btn ghost small skip">Skip</button></div>
+    <div class="sprint-progress"><span></span></div><div class="sprint-stage"><p class="loader-msg">Getting problems ready…</p></div>`;
+  const stage = $('.sprint-stage', body);
+  const results = [];
+  const start = Date.now();
+  let alive = true;
+  let next = answerableProblem();
+  const fmt = (ms) => { const t = Math.floor(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+  const timer = setInterval(() => { if (alive) $('.sprint-time', body).textContent = fmt(Date.now() - start); }, 500);
+  const stop = () => { alive = false; clearInterval(timer); };
+  const show = async () => {
+    const i = results.length;
+    $('.sprint-count', body).textContent = `${Math.min(i + 1, SPRINT_LEN)} / ${SPRINT_LEN}`;
+    $('.sprint-progress span', body).style.width = `${(100 * i) / SPRINT_LEN}%`;
+    if (i >= SPRINT_LEN) return finish();
+    stage.innerHTML = '<p class="loader-msg">Loading…</p>';
+    let card;
+    try { card = await next; } catch { stage.innerHTML = '<p class="loader-msg">Couldn’t load problems. Check your connection.</p>'; return; }
+    if (!alive) return;
+    next = i + 1 < SPRINT_LEN ? answerableProblem() : null;
+    let done = false;
+    const el = buildCard(card, {
+      standalone: true,
+      onAnswered: (ok) => {
+        if (done) return; done = true;
+        results.push(ok ? 'right' : 'wrong');
+        setTimeout(() => { if (alive) show(); }, ok ? 900 : 2200);
+      },
+    });
+    el.querySelectorAll('.rail .sol, .rail .open, .hint-btn').forEach((x) => x.remove()); // no peeking mid-sprint
+    stage.innerHTML = '';
+    stage.appendChild(el);
+    $('.skip', body).onclick = () => { if (done) return; done = true; results.push('skip'); show(); };
+  };
+  const finish = () => {
+    stop();
+    const right = results.filter((r) => r === 'right').length;
+    const time = fmt(Date.now() - start);
+    const best = state.stats.sprintBest || 0;
+    const isBest = right > best || (right === best && right > 0 && (Date.now() - start) < (state.stats.sprintBestMs || Infinity));
+    if (isBest) { state.stats.sprintBest = right; state.stats.sprintBestMs = Date.now() - start; saveStats(); }
+    $('.sprint-bar', body).hidden = true;
+    stage.innerHTML = `<div class="sprint-done"><div class="score">${right}<small>/ ${SPRINT_LEN}</small></div>
+      <p>${right >= 8 ? 'Outstanding.' : right >= 5 ? 'Nice work.' : 'Good practice — go again?'} Time ${time}.${isBest ? ' <b>New personal best!</b>' : ''}</p>
+      <div class="dots">${results.map((r) => `<span class="${r}"></span>`).join('')}</div>
+      <button class="btn wide again">Go again</button><button class="btn ghost wide brag">Share score</button></div>`;
+    $('.again', stage).addEventListener('click', openSprint);
+    $('.brag', stage).addEventListener('click', () => shareText(`I got ${right}/${SPRINT_LEN} on a MathScroll AMC/AIME sprint in ${time}. Beat that!`));
+  };
+  openSheet('Sprint', body, 'tall', stop);
+  show();
 }
 
 // ------------------------------------------------------------------ settings

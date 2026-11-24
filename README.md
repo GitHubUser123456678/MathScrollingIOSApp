@@ -15,7 +15,20 @@ An endless, swipe-up feed of maths — like TikTok, but every "video" is a conte
 
 Why the mirrors? AoPS puts every automated request through a bot check, and ProofWiki and the OEIS don't allow other websites/apps to read them. Hugging Face hosts public copies of their content with an open API, so the app reads those instead. Every card's **Source** button takes you to the original.
 
-**Features:** swipe one card at a time · tap A–E or type a numeric answer and it's checked · streak counter · solutions and proofs slide up in a sheet · save cards · share · filter problems by topic (algebra, number theory, combinatorics incl. graph theory, geometry, inequalities, calculus) · maths typeset with KaTeX · the app itself works offline (content needs internet).
+**Features**
+- Swipe one card at a time, TikTok-style. Double-tap or tap the heart to like.
+- Tap A–E or type an answer and it's checked instantly; streak counter for answers in a row.
+- **Hints** (the first step of the solution) and full solutions/proofs that slide up.
+- **Daily challenge**: the same AMC/AIME problem for everyone each day, with a daily streak and a share-your-result button.
+- **Sprint**: 10 answerable AMC/AIME problems against the clock, with a personal best.
+- **Guess the next term** on every OEIS sequence.
+- **Post** your own problems, facts and questions with a live maths preview. Sharing makes a link that contains the whole post, so anyone can open it in MathScroll — no account or server needed.
+- **Search** across problems, ProofWiki, the OEIS and Wikipedia.
+- **Profile**: solved count, accuracy, best run, day streak, daily goal with a 7-day strip, 16 badges, and your Saved / Liked / Posts.
+- **For you** learns what you like, save and solve, and shows more of it.
+- Topic filter (algebra, number theory, combinatorics incl. graph theory, geometry, inequalities, calculus, logic), light/dark theme, works offline for the app shell.
+
+Everything you do is stored on your own phone — there are no accounts.
 
 No API keys, no server, no accounts. Everything is free and public.
 

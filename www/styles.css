@@ -403,3 +403,22 @@ textarea.field { font-family: var(--serif); font-size: 17px; line-height: 1.45; 
 .badge small { font-size: 11px; color: var(--muted); }
 .brag { font-size: 15px; }
 .content .btn, .content .feedback, .content .numeric input::placeholder { font-family: var(--sans); }
+
+/* sprint */
+.sprint { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.sprint-bar { display: flex; align-items: center; gap: 12px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.sprint-bar .sprint-time { flex: 1; color: var(--muted); }
+.sprint-progress { height: 4px; border-radius: 2px; background: var(--line); margin: 10px 0 6px; overflow: hidden; }
+.sprint-progress span { display: block; height: 100%; width: 0; background: var(--accent, #f5b942); background: #f5b942; transition: width .3s; }
+.sprint-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sprint-stage .card.standalone { flex: 1; }
+.sprint-done { text-align: center; padding-top: 30px; }
+.sprint-done .score { font: 700 72px var(--serif); line-height: 1; }
+.sprint-done .score small { font-size: 28px; color: var(--muted); }
+.sprint-done p { color: var(--muted); }
+.sprint-done p b { color: var(--ok); }
+.sprint-done .dots { display: flex; justify-content: center; gap: 6px; margin: 16px 0 10px; }
+.sprint-done .dots span { width: 14px; height: 14px; border-radius: 50%; background: var(--line); }
+.sprint-done .dots .right { background: var(--ok); }
+.sprint-done .dots .wrong { background: var(--no); }
+.sprint-start { margin: 0 0 16px; }
