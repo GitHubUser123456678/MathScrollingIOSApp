@@ -1,4 +1,5 @@
 // Turns raw wiki HTML into safe, nicely-typeset card content.
+import { asyToElement } from './asy.js';
 
 const BASES = {
   aops: 'https://artofproblemsolving.com',
@@ -222,7 +223,7 @@ function sanitize(root, base) {
       const cls = child.getAttribute('class') || '';
       for (const a of [...child.attributes]) child.removeAttribute(a.name);
       for (const [k, v] of Object.entries(keep)) if (v != null) child.setAttribute(k, v);
-      const keepCls = cls.split(/\s+/).filter((c) => /^(asy|tex-img|eqn|eqn-l|eqn-r|eqn-c|diagram-note|qed|pw-display|oeis-name|hint|plain|figure|tex-table|tex-list|tex-raw)$/.test(c));
+      const keepCls = cls.split(/\s+/).filter((c) => /^(asy|tex-img|eqn|eqn-l|eqn-r|eqn-c|diagram-note|qed|pw-display|oeis-name|hint|plain|figure|tex-table|tex-list|tex-raw|wiki-img|fig-cap|img-missing)$/.test(c));
       if (keepCls.length) child.setAttribute('class', keepCls.join(' '));
       if (tag === 'A') {
         const href = keep.href || '';
@@ -373,9 +374,53 @@ function markedMath(root) {
   return spans.length > 0;
 }
 
+// Asymptote label text: $…$ parts typeset, the rest as plain text.
+function asyLabel(s) {
+  const str = String(s);
+  if (!str.includes('$')) return str.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  return str.split(/(\$[^$]*\$)/).map((part) => (part.startsWith('$') && part.endsWith('$') && part.length > 1
+    ? texSafe(part.slice(1, -1), false)
+    : part.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])))).join('');
+}
+const asyCache = new Map();
+function drawAsy(root) {
+  for (const src of root.querySelectorAll('.asy-src')) {
+    const code = src.textContent;
+    let fig;
+    try {
+      if (!asyCache.has(code)) { const el = asyToElement(code, asyLabel); asyCache.set(code, el.outerHTML); }
+      fig = document.createElement('span');
+      fig.className = 'tex-block asy-wrap';
+      fig.innerHTML = asyCache.get(code);
+    } catch (e) {
+      console.warn('[MathScroll] diagram not drawn:', e.message);
+      fig = document.createElement('span');
+      fig.className = 'tex-block asy-fail';
+      fig.innerHTML = `<span class="diagram-note">This problem has a diagram MathScroll couldn’t draw. Tap <b>Source</b> to see it.</span><details class="asy-code"><summary>Diagram code</summary><pre></pre></details>`;
+      fig.querySelector('pre').textContent = code.trim();
+    }
+    src.replaceWith(fig);
+  }
+}
+// Images: don't send the page address to image hosts, and say so if one fails to load.
+function imageFallbacks(root) {
+  for (const img of root.querySelectorAll('img')) {
+    if (img.closest('.tex, .tex-block')) continue;
+    img.setAttribute('referrerpolicy', 'no-referrer');
+    img.addEventListener('error', () => {
+      const note = document.createElement('span');
+      note.className = 'img-missing';
+      note.innerHTML = 'Picture couldn’t load. <a target="_blank" rel="noopener">Open it</a>';
+      note.querySelector('a').href = img.src;
+      img.replaceWith(note);
+    }, { once: true });
+  }
+}
+
 export function renderContent(html, { base, dollar = false } = {}) {
   const wrap = document.createElement('div');
   wrap.innerHTML = html;
+  drawAsy(wrap);
   // Strip wiki chrome before sanitising.
   wrap.querySelectorAll('.mw-editsection, .toc, #toc, .navbox, .reference, sup.reference, .mw-references-wrap, .printfooter, .catlinks, table.wikitable.navbox, .noprint, .mw-empty-elt').forEach((n) => n.remove());
   if (base === 'aops') {
@@ -389,5 +434,6 @@ export function renderContent(html, { base, dollar = false } = {}) {
   if (dollar && !marked) dollarMath(wrap);
   // Remove empty paragraphs.
   wrap.querySelectorAll('p').forEach((p) => { if (!p.textContent.trim() && !p.querySelector('img,.tex,.tex-block')) p.remove(); });
+  imageFallbacks(wrap);
   return wrap;
 }

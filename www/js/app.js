@@ -1925,6 +1925,28 @@ function openWelcome() {
   openSheet('Welcome to MathScroll', body, 'tall', finish);
 }
 
+// ------------------------------------------------------------------ picture viewer
+// Tap a diagram or picture to see it full screen; tap again (or the background) to close; double-tap to zoom.
+document.addEventListener('click', (e) => {
+  const target = e.target.closest('.content img, .asy-wrap');
+  if (!target || e.target.closest('a')) return;
+  e.stopPropagation();
+  const box = h('<div class="lightbox" role="dialog" aria-label="Picture"><div class="lb-inner"></div><button class="lb-close" aria-label="Close">✕</button></div>');
+  const clone = target.cloneNode(true);
+  clone.classList.add('lb-item');
+  $('.lb-inner', box).appendChild(clone);
+  let zoomed = false; let lastTap = 0;
+  box.addEventListener('click', (ev) => {
+    const now = Date.now();
+    if (ev.target.closest('.lb-item') && now - lastTap < 320) { zoomed = !zoomed; box.classList.toggle('zoomed', zoomed); lastTap = 0; return; }
+    lastTap = now;
+    if (ev.target.closest('.lb-item') && zoomed) return;
+    setTimeout(() => { if (Date.now() - lastTap >= 300 && !zoomed) box.remove(); }, 330);
+  });
+  $('.lb-close', box).addEventListener('click', (ev) => { ev.stopPropagation(); box.remove(); });
+  document.body.appendChild(box);
+}, true);
+
 $('#profileBtn').addEventListener('click', openProfile);
 $('#createBtn').addEventListener('click', () => openCompose());
 $('#searchBtn').addEventListener('click', () => openSearch());

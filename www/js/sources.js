@@ -149,8 +149,12 @@ function tokenize(s) {
 // Text-mode LaTeX and Markdown → HTML. Input is raw text; output is safe HTML.
 function textMode(raw) {
   let s = escapeHTML(raw);
-  // Markdown images (many olympiad problems have their diagrams this way) and links.
-  s = s.replace(/!\[([^\]]*)\]\((https:\/\/[^)\s]+)\)/g, (_, alt, url) => `<img class="figure" src="${url}" alt="${alt || 'Figure'}">`);
+  // Images: Markdown ![](url) (olympiad diagrams), forum [img]url[/img], and bare image links.
+  const imgs = [];
+  const keep = (url, alt = 'Figure') => { imgs.push(`<img class="figure" src="${url}" alt="${alt}">`); return `${imgs.length - 1}`; };
+  s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (_, alt, url) => keep(url, alt || 'Figure'));
+  s = s.replace(/\[img\]\s*(https?:\/\/[^\s[]+?)\s*\[\/img\]/gi, (_, url) => keep(url));
+  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<>"]+?\.(?:png|jpe?g|gif|svg|webp)(?:\?[^\s<>"]*)?)(?=$|[\s).,])/gi, (_, pre, url) => pre + keep(url));
   s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>');
   for (const [cmd, tag] of [['textbf', 'b'], ['bf', 'b'], ['textit', 'i'], ['emph', 'i'], ['textsl', 'i'], ['underline', 'u'], ['texttt', 'code']]) {
     s = replaceCmd(s, cmd, (x) => `<${tag}>${x}</${tag}>`);
@@ -175,6 +179,7 @@ function textMode(raw) {
     .replace(/``/g, '“').replace(/''/g, '”')
     .replace(/---/g, '—').replace(/(\s)--(\s)/g, '$1–$2')
     .replace(/~/g, ' ');
+  s = s.replace(/(\d+)/g, (_, n) => imgs[Number(n)] || '');
   // Markdown emphasis and headings.
   s = s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|\n)#{1,4}\s+([^\n]+)/g, '$1<b>$2</b>');
   return s;
@@ -209,14 +214,15 @@ export function textToHtml(text) {
     tables.push(tabularToHtml(body));
     return `${tables.length - 1}`;
   });
-  // Asymptote diagram code can't be drawn here.
-  s = s.replace(/\[asy\][\s\S]*?\[\/asy\]/gi, '');
+  // Asymptote diagrams: kept as code for render.js to draw.
+  const asys = [];
+  s = s.replace(/\[asy\]([\s\S]*?)\[\/asy\]/gi, (_, code) => { asys.push(code); return `${asys.length - 1}`; });
   let html = tokenize(s).map((t) => {
     if (t.math) return mathSpan(t.tex, t.display);
     return textMode(t.text).replace(new RegExp(DOLLAR, 'g'), '$');
   }).join('');
   html = html.replace(/(\d+)/g, (_, n) => tables[Number(n)] || '')
-    .replace(//g, '<span class="diagram-note">This problem has a diagram. Tap <b>Source</b> to see it.</span>');
+    .replace(/(\d+)/g, (_, n) => `<span class="asy-src">${escapeHTML(asys[Number(n)] || '')}</span>`);
   // The "tt" wrapper tells the renderer this text was already parsed, so stray $ signs are money, not maths.
   return `<div class="tt">${html.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)
     .map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('')}</div>`;
@@ -670,9 +676,27 @@ async function wikiCard(title) {
   const parsed = await getJSON(mwURL({ action: 'parse', page: title, prop: 'text', section: '0', redirects: '1', disableeditsection: '1' }));
   if (parsed.error) return null;
   const doc = new DOMParser().parseFromString(parsed.parse.text, 'text/html');
+  // Keep the article's first real picture (diagram, photo) before stripping page furniture.
+  let picture = null;
+  for (const img of doc.querySelectorAll('figure img, .thumb img, .infobox img, .mw-default-size img')) {
+    const w = Number(img.getAttribute('width') || 0);
+    if (w && w < 100) continue; // icons and flags
+    const fig = img.closest('figure, .thumb');
+    const cap = fig?.querySelector('figcaption, .thumbcaption')?.textContent.trim() || '';
+    picture = { src: img.getAttribute('src'), alt: img.getAttribute('alt') || cap || title, cap };
+    break;
+  }
   doc.querySelectorAll('.infobox, .sidebar, .navbox, .hatnote, .mw-empty-elt, .reference, .metadata, .ambox, table, style, .shortdescription, .mw-references-wrap, figure, .thumb, .noprint').forEach((n) => n.remove());
   const root = doc.querySelector('.mw-parser-output') || doc.body;
   if (root.textContent.trim().length < 120) return null;
+  if (picture?.src) {
+    // Place the picture after the first paragraph, using a larger thumbnail than the page shows.
+    const src = picture.src.replace(/\/(\d{2,3})px-/, (m, w) => (Number(w) < 400 ? '/400px-' : m));
+    const holder = doc.createElement('div');
+    holder.innerHTML = `<img class="wiki-img" src="${src}" alt="${escapeHTML(picture.alt)}">${picture.cap ? `<p class="fig-cap">${escapeHTML(picture.cap)}</p>` : ''}`;
+    const firstP = root.querySelector(':scope > p');
+    if (firstP) firstP.after(...holder.childNodes); else root.append(...holder.childNodes);
+  }
   const t = parsed.parse.title || title;
   return {
     id: `wiki:${t}`,
