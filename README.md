@@ -4,14 +4,19 @@ An endless, swipe-up feed of maths — like TikTok, but every "video" is a conte
 
 **What's in the feed**
 
-| Tab | What | Size | Where it comes from |
+| Tab | What | Size | Difficulty |
 |---|---|---|---|
-| AMC/AIME | AMC 8/10/12 and AIME problems, with the AoPS Wiki solutions | ~5,000 | NuminaMath dataset (Hugging Face) |
-| AoPS | Problems posted on the AoPS forums, with solutions | ~33,000 | NuminaMath dataset |
-| Olympiad | Olympiad problems from around the world, with solutions | ~157,000 | NuminaMath dataset |
-| Proofs | ProofWiki theorems with their proofs | ~24,800 | NaturalProofs dataset (a ProofWiki snapshot) |
-| Sequences | The entire OEIS | ~392,000 | OEIS mirror on Hugging Face |
-| Concepts | Maths articles: number theory, abstract algebra, graph theory, combinatorics, geometry, analysis, topology… | thousands | Wikipedia, live |
+| Community | Problems, facts and questions posted by people using the app | grows | set by the poster |
+| AMC/AIME | AMC 8/10/12 and AIME problems with AoPS Wiki solutions | ~5,000 | estimated |
+| MATH | Competition problems with worked solutions (MATH dataset) | 12,500 | rated, levels 1–5 |
+| Omni | Olympiad problems (Omni-MATH) | 4,400 | rated 1–10 |
+| AoPS | Problems posted on the AoPS forums | ~33,000 | estimated |
+| Olympiad | Olympiad problems from around the world | ~157,000 | estimated |
+| Proofs | ProofWiki theorems with their proofs | ~24,800 | – |
+| Sequences | The entire OEIS | ~392,000 | – |
+| Concepts | Wikipedia maths articles | thousands | – |
+
+Every problem is placed on one 1–10 difficulty scale (AMC 10/12 ≈ 2–4, AIME ≈ 4–6, olympiads ≈ 6–10).
 
 Why the mirrors? AoPS puts every automated request through a bot check, and ProofWiki and the OEIS don't allow other websites/apps to read them. Hugging Face hosts public copies of their content with an open API, so the app reads those instead. Every card's **Source** button takes you to the original.
 
@@ -24,11 +29,14 @@ Why the mirrors? AoPS puts every automated request through a bot check, and Proo
 - **Guess the next term** on every OEIS sequence.
 - **Post** your own problems, facts and questions with a live maths preview. Sharing makes a link that contains the whole post, so anyone can open it in MathScroll — no account or server needed.
 - **Search** across problems, ProofWiki, the OEIS and Wikipedia.
+- **Accounts & Community** (after the 5-minute setup in [SETUP-ACCOUNTS.md](SETUP-ACCOUNTS.md)): sign up with a username, post publicly, like, comment, report, and share links to posts.
+- **Filters**: difficulty range or "match my level", answer type (A–E / number / proof), only checkable problems, topics, Wikipedia topics, sources, classic sequences, skip seen.
+- **Skill rating**: an Elo-style rating that rises faster for harder problems, with a history graph and accuracy by difficulty and by topic.
 - **Profile**: solved count, accuracy, best run, day streak, daily goal with a 7-day strip, 16 badges, and your Saved / Liked / Posts.
 - **For you** learns what you like, save and solve, and shows more of it.
 - Topic filter (algebra, number theory, combinatorics incl. graph theory, geometry, inequalities, calculus, logic), light/dark theme, works offline for the app shell.
 
-Everything you do is stored on your own phone — there are no accounts.
+Without accounts set up, everything is stored on your own phone. With them, posts, likes and comments are public; your stats stay on your phone.
 
 No API keys, no server, no accounts. Everything is free and public.
 

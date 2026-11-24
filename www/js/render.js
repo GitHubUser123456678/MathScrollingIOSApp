@@ -95,17 +95,94 @@ const MACROS = {
   '\\leadstoandfrom': '\\leftrightsquigarrow',
   '\\laptrans': '\\mathcal L\\left\\{#1\\right\\}',
   '\\fractpart': '\\left\\{#1\\right\\}',
+  '\\lt': '<',
+  '\\gt': '>',
+  '\\cal': '\\mathcal',
+  '\\Box': '\\square',
+  '\\bigstar': '\\star',
+  '\\dint': '\\displaystyle\\int',
+  '\\iint': '\\int\\!\\!\\int',
+  '\\textsuperscript': '^{\\text{#1}}',
+  '\\textsubscript': '_{\\text{#1}}',
+  '\\unit': '\\,\\mathrm{#1}',
+  '\\si': '\\mathrm{#1}',
+  '\\SI': '#1\\,\\mathrm{#2}',
+  '\\num': '#1',
+  '\\parallelogram': '\\square',
+  '\\overarc': '\\overset{\\frown}{#1}',
+  '\\arc': '\\overset{\\frown}{#1}',
+  '\\cdotp': '\\cdot',
+  '\\xlongequal': '\\overset{#1}{=\\!=}',
+  '\\textcircled': '(#1)',
+  '\\multicolumn': '#3',
+  '\\Rightarrow': '\\Rightarrow',
 };
 
-function tex(src, display) {
-  // eslint-disable-next-line no-undef
-  return katex.renderToString(src, { displayMode: display, throwOnError: true, macros: { ...MACROS }, trust: false, strict: 'ignore' });
+// ------------------------------------------------------------------ robust KaTeX
+// Rewrites for LaTeX that KaTeX doesn't support, applied before typesetting.
+function fixTex(src) {
+  return src
+    .replace(/\\begin\{eqnarray\*?\}/g, '\\begin{aligned}').replace(/\\end\{eqnarray\*?\}/g, '\\end{aligned}')
+    .replace(/&\s*=\s*&/g, '&=')
+    .replace(/\\begin\{tabular\}/g, '\\begin{array}').replace(/\\end\{tabular\}/g, '\\end{array}')
+    .replace(/\\label\{[^}]*\}|\\nonumber|\\notag|\\(?:vspace|vskip)\*?\{[^}]*\}|\\centering|\\displaybreak/g, '')
+    .replace(/\\(?:textup|textnormal|textrm|textsc|hbox|mbox)\s*\{/g, '\\text{')
+    .replace(/\\mathbbm\b/g, '\\mathbb').replace(/\\bold\b/g, '\\mathbf').replace(/\\Bbb\b/g, '\\mathbb')
+    .replace(/\\(?:textdegree|degree)\b/g, '^\\circ')
+    .replace(/\\cline\{[^}]*\}/g, '')
+    .replace(/\\overparen\b/g, '\\overgroup').replace(/\\wideparen\b/g, '\\overgroup')
+    .replace(/\\(?:newline)\b/g, '\\\\')
+    .replace(/\\(?:limits)\b(?!\s*[_^])/g, '')
+    .replace(/[\u00a0\u2003]/g, ' ')
+    .replace(/\\\$/g, '\\$');
 }
 
-function texSoft(src, display) {
+const texCache = new Map();
+function renderTex(src, display) {
   // eslint-disable-next-line no-undef
-  return katex.renderToString(src, { displayMode: display, throwOnError: false, macros: { ...MACROS }, strict: 'ignore', errorColor: 'var(--muted)' });
+  return katex.renderToString(src, { displayMode: display, throwOnError: true, macros: { ...MACROS }, trust: false, strict: 'ignore', maxExpand: 2000 });
 }
+// Typeset TeX, repairing common problems; never throws. Falls back to showing the source quietly.
+function texSafe(src, display) {
+  const key = `${display ? 'D' : 'I'}${src}`;
+  if (texCache.has(key)) return texCache.get(key);
+  let t = fixTex(src);
+  let html = null;
+  for (let attempt = 0; attempt < 6 && html == null; attempt++) {
+    try {
+      html = renderTex(t, display);
+    } catch (e) {
+      const msg = String(e.message || '');
+      const undef = msg.match(/Undefined control sequence: (\\[a-zA-Z]+)/);
+      if (undef) {
+        // Unknown command: show its name upright instead of failing the whole formula.
+        const name = undef[1];
+        t = t.split(name).join(`\\operatorname{${name.slice(1)}}`);
+      } else if (/\\left|\\right|Expected '\\right'|Missing \\right/.test(msg) && /\\(left|right)/.test(t)) {
+        t = t.replace(/\\left\s*/g, '').replace(/\\right\s*/g, '');
+      } else if (/Expected '}'|Unexpected end|Expected '\\}'|Extra }|Unmatched|Expected group|Expected 'EOF'/.test(msg)) {
+        const bare = t.replace(/\\[{}]/g, ''); const open = (bare.match(/\{/g) || []).length; const close = (bare.match(/\}/g) || []).length;
+        if (open > close) t += '}'.repeat(open - close);
+        else if (close > open) t = '{'.repeat(close - open) + t;
+        else break;
+      } else if (/environment|\\begin|\\end/.test(msg) && /\\begin\{[a-z]+\*?\}/.test(t)) {
+        t = t.replace(/\\begin\{[a-zA-Z]+\*?\}(\{[^}]*\})?/g, '\\begin{aligned}').replace(/\\end\{[a-zA-Z]+\*?\}/g, '\\end{aligned}');
+      } else if (/display mode|only allowed in display/.test(msg) && !display) {
+        display = true;
+      } else {
+        break;
+      }
+    }
+  }
+  if (html == null) {
+    html = `<code class="tex-raw">${String(src).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</code>`;
+  }
+  if (texCache.size > 3000) texCache.clear();
+  texCache.set(key, html);
+  return html;
+}
+function tex(src, display) { return texSafe(src, display); }
+function texSoft(src, display) { return texSafe(src, display); }
 
 const ALLOWED = new Set(['P', 'DIV', 'SPAN', 'A', 'B', 'I', 'EM', 'STRONG', 'U', 'SUB', 'SUP', 'BR', 'HR', 'UL', 'OL', 'LI', 'DL', 'DT', 'DD',
   'H3', 'H4', 'H5', 'BLOCKQUOTE', 'CODE', 'PRE', 'IMG', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TD', 'TH', 'CENTER', 'SMALL', 'S', 'TT', 'CAPTION',
@@ -145,7 +222,7 @@ function sanitize(root, base) {
       const cls = child.getAttribute('class') || '';
       for (const a of [...child.attributes]) child.removeAttribute(a.name);
       for (const [k, v] of Object.entries(keep)) if (v != null) child.setAttribute(k, v);
-      const keepCls = cls.split(/\s+/).filter((c) => /^(asy|tex-img|eqn|eqn-l|eqn-r|eqn-c|diagram-note|qed|pw-display|oeis-name|hint|plain)$/.test(c));
+      const keepCls = cls.split(/\s+/).filter((c) => /^(asy|tex-img|eqn|eqn-l|eqn-r|eqn-c|diagram-note|qed|pw-display|oeis-name|hint|plain|figure|tex-table|tex-list|tex-raw)$/.test(c));
       if (keepCls.length) child.setAttribute('class', keepCls.join(' '));
       if (tag === 'A') {
         const href = keep.href || '';
@@ -274,6 +351,28 @@ function dollarMath(root) {
   }
 }
 
+// <span class="m">TeX</span> placeholders from the plain-text parser in sources.js.
+function markedMath(root) {
+  const spans = root.querySelectorAll('span.m');
+  for (const sp of spans) {
+    const display = sp.classList.contains('md');
+    const src = sp.textContent;
+    const parts = display ? [src] : splitQuads(src);
+    let el;
+    if (parts.length > 1) {
+      el = document.createElement('span');
+      el.className = 'tex choice-line';
+      el.innerHTML = parts.map((p) => `<span class="choice-item">${texSafe(p, false)}</span>`).join('');
+    } else {
+      el = document.createElement('span');
+      el.className = display ? 'tex-block' : 'tex';
+      el.innerHTML = texSafe(src, display);
+    }
+    sp.replaceWith(el);
+  }
+  return spans.length > 0;
+}
+
 export function renderContent(html, { base, dollar = false } = {}) {
   const wrap = document.createElement('div');
   wrap.innerHTML = html;
@@ -285,8 +384,9 @@ export function renderContent(html, { base, dollar = false } = {}) {
     aopsMath(wrap);
   }
   if (base === 'wikipedia') wikiMath(wrap);
+  const marked = markedMath(wrap) || !!wrap.querySelector('.tt');
   sanitize(wrap, base);
-  if (dollar) dollarMath(wrap);
+  if (dollar && !marked) dollarMath(wrap);
   // Remove empty paragraphs.
   wrap.querySelectorAll('p').forEach((p) => { if (!p.textContent.trim() && !p.querySelector('img,.tex,.tex-block')) p.remove(); });
   return wrap;

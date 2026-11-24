@@ -1,5 +1,6 @@
-import { SOURCES, PROBLEM_TOPICS, escapeHTML, textToHtml, answerFor, searchAll, dailyChallenge } from './sources.js';
+import { SOURCES, PROBLEM_TOPICS, escapeHTML, textToHtml, answerFor, searchAll, dailyChallenge, DEFAULT_FILTERS, difficultyToRating, difficultyWindow, WIKI_GROUP_NAMES } from './sources.js';
 import { renderContent } from './render.js';
+import * as cloud from './cloud.js';
 
 // Where shared post links point. On the website it's the site itself; inside the iOS app it's the public site.
 const PUBLIC_URL = location.protocol === 'https:'
@@ -17,8 +18,9 @@ const store = {
 };
 
 const DEFAULT_SETTINGS = {
-  sources: { contest: true, olympiad: true, aops: true, proofwiki: true, oeis: true, wikipedia: true },
-  weights: { contest: 24, olympiad: 16, aops: 14, proofwiki: 18, oeis: 12, wikipedia: 16 },
+  sources: { contest: true, math: true, omni: true, olympiad: true, aops: true, proofwiki: true, oeis: true, wikipedia: true },
+  weights: { contest: 20, math: 14, omni: 10, olympiad: 12, aops: 10, proofwiki: 14, oeis: 9, wikipedia: 13 },
+  filters: { ...DEFAULT_FILTERS },
   topics: [...PROBLEM_TOPICS],
   personalise: true,
   dailyGoal: 5,
@@ -47,6 +49,10 @@ const state = {
 };
 state.settings.sources = { ...DEFAULT_SETTINGS.sources, ...state.settings.sources };
 state.settings.weights = { ...DEFAULT_SETTINGS.weights, ...state.settings.weights };
+state.settings.filters = { ...DEFAULT_FILTERS, ...state.settings.filters };
+if (state.stats.rating == null) state.stats.rating = 1000;
+const filters = () => state.settings.filters;
+const fetchSettings = () => ({ ...state.settings, rating: state.stats.rating });
 state.settings.v = 2;
 if (!Array.isArray(state.settings.topics) || !state.settings.topics.length) state.settings.topics = [...PROBLEM_TOPICS];
 
@@ -88,6 +94,7 @@ function engage(source, amount) {
   store.set('engagement', state.engagement);
 }
 function weightFor(source) {
+  if (source === 'community') return 9;
   const base = state.settings.weights[source] || 1;
   if (!state.settings.personalise) return base;
   const score = state.engagement[source] || 0;
@@ -146,6 +153,8 @@ const ICONS = {
   open: '<svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
   gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+  chat: '<svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z"/></svg>',
+  flag: '<svg viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg>',
 };
 
 let toastTimer;
@@ -213,6 +222,34 @@ function postCard(p) {
     url: null,
   };
 }
+// A public post from the community database.
+function cloudCard(row) {
+  const kind = POST_KINDS[row.kind] ? row.kind : 'problem';
+  const prof = row.profiles || {};
+  const name = prof.username ? `@${prof.username}` : 'someone';
+  const p = { t: row.title || '', b: row.body, a: row.answer || '', s: row.solution || '', n: name, k: kind, d: Date.parse(row.created_at) };
+  return {
+    ...postCard(p),
+    id: `cloud:${row.id}`,
+    cloudId: row.id,
+    ownerId: row.user_id,
+    author: name,
+    likeCount: row.like_count || 0,
+    commentCount: row.comment_count || 0,
+    topic: row.topic || null,
+    difficulty: row.difficulty || null,
+    rated: false,
+    solutionNote: `Posted by ${name} on MathScroll.`,
+  };
+}
+const timeAgo = (t) => {
+  const s = Math.max(1, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.round(s / 60); if (m < 60) return `${m}m`;
+  const hr = Math.round(m / 60); if (hr < 24) return `${hr}h`;
+  const d = Math.round(hr / 24); return d < 30 ? `${d}d` : new Date(t).toLocaleDateString();
+};
+
 async function postLink(p) {
   return `${PUBLIC_URL}#p=${await encodePost({ t: p.t, b: p.b, a: p.a, s: p.s, n: p.n, k: p.k, d: p.d })}`;
 }
@@ -220,7 +257,10 @@ async function postLink(p) {
 // ------------------------------------------------------------------ tabs
 const TABS = [
   { id: 'mix', label: 'For you' },
+  { id: 'community', label: 'Community' },
   { id: 'contest', label: 'AMC/AIME' },
+  { id: 'math', label: 'MATH' },
+  { id: 'omni', label: 'Omni' },
   { id: 'aops', label: 'AoPS' },
   { id: 'olympiad', label: 'Olympiad' },
   { id: 'proofwiki', label: 'Proofs' },
@@ -231,8 +271,12 @@ const TABS = [
 function renderTabs() {
   const nav = $('#tabs');
   nav.innerHTML = '';
+  const n = activeFilterCount();
+  const fb = h(`<button class="tab filter-pill ${n ? 'on' : ''}" aria-label="Filters"><svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>${n ? `<b>${n}</b>` : ''}</button>`);
+  fb.addEventListener('click', openFilters);
+  nav.appendChild(fb);
   for (const t of TABS) {
-    if (t.id !== 'mix' && !state.settings.sources[t.id]) continue;
+    if (t.id === 'community' ? !cloud.cloudEnabled : t.id !== 'mix' && !state.settings.sources[t.id]) continue;
     const b = h(`<button role="tab" class="tab" data-tab="${t.id}" aria-selected="${state.tab === t.id}">${t.label}</button>`);
     b.addEventListener('click', () => switchTab(t.id));
     nav.appendChild(b);
@@ -250,9 +294,13 @@ function switchTab(id) {
 
 // ------------------------------------------------------------------ fetching
 function activeSources() {
+  if (state.tab === 'community') return ['community'];
   const enabled = Object.keys(SOURCES).filter((k) => state.settings.sources[k] && (state.failures[k] || 0) < 5);
   if (state.tab !== 'mix') return enabled.includes(state.tab) ? [state.tab] : [];
-  return enabled;
+  const fs = fetchSettings();
+  const list = enabled.filter((k) => !SOURCES[k].eligible || SOURCES[k].eligible(fs));
+  if (cloud.cloudEnabled && (state.failures.community || 0) < 3 && filters().qtype === 'any' && !filters().checkable) list.push('community');
+  return list;
 }
 
 function pickSource(list) {
@@ -262,19 +310,55 @@ function pickSource(list) {
   return list[list.length - 1];
 }
 
+// Community posts: newest first on the Community tab; a random recent one inside For you.
+const community = { offset: 0, buffer: [], done: false, recent: null };
+function resetCommunity() { community.offset = 0; community.buffer = []; community.done = false; }
+async function communityCard() {
+  if (state.tab === 'community') {
+    if (!community.buffer.length && !community.done) {
+      const rows = await cloud.listPosts({ order: state.communityOrder || 'new', limit: 15, offset: community.offset });
+      community.offset += rows.length;
+      if (rows.length < 15) community.done = true;
+      community.buffer.push(...rows);
+    }
+    const row = community.buffer.shift();
+    if (!row) throw new Error('end');
+    return cloudCard(row);
+  }
+  if (!community.recent || Date.now() - community.recent.at > 5 * 60000) {
+    community.recent = { at: Date.now(), rows: await cloud.listPosts({ order: 'new', limit: 50 }) };
+  }
+  const fresh = community.recent.rows.filter((r) => !state.seen.has(`cloud:${r.id}`) && !state.cards.some((c) => c.data.id === `cloud:${r.id}`));
+  if (!fresh.length) throw new Error('no matching problem');
+  return cloudCard(fresh[Math.floor(Math.random() * fresh.length)]);
+}
+
 async function fetchCard() {
   for (let attempt = 0; attempt < 6; attempt++) {
     const list = activeSources();
     if (!list.length) throw new Error('none');
     const key = pickSource(list);
+    if (key === 'community') {
+      try {
+        const card = await communityCard();
+        if (state.cards.some((c) => c.data.id === card.id)) continue;
+        return card;
+      } catch (err) {
+        if (err.message === 'end') throw err;
+        if (err.message !== 'no matching problem') state.failures.community = (state.failures.community || 0) + 1;
+        if (state.tab === 'community') throw err;
+        continue;
+      }
+    }
     try {
-      const card = await SOURCES[key].fetch(state.settings);
+      const card = await SOURCES[key].fetch(fetchSettings());
       state.failures[key] = 0;
-      if (state.seen.has(card.id) && attempt < 4) continue;
+      if (filters().hideSeen && state.seen.has(card.id) && attempt < 4) continue;
       if (state.cards.some((c) => c.data.id === card.id)) continue;
       return card;
     } catch (err) {
-      state.failures[key] = (state.failures[key] || 0) + 1;
+      // "Nothing matches" isn't the source being down.
+      if (err.message !== 'no matching problem') state.failures[key] = (state.failures[key] || 0) + 1;
       console.warn(`[MathScroll] ${key} failed:`, err.message);
     }
   }
@@ -301,10 +385,11 @@ function resetFeed() {
   state.cards = [];
   state.pending = 0;
   currentEl = null;
+  resetCommunity();
   feed.innerHTML = '';
   feed.appendChild(loaderEl());
   feed.scrollTop = 0;
-  state.pins.forEach(appendCard);
+  if (state.tab === 'mix') state.pins.forEach(appendCard);
   fill();
 }
 
@@ -328,19 +413,34 @@ function showFeedError(code) {
   const msg = $('#loaderMsg');
   const btn = $('#retryBtn');
   if (!msg) return;
+  if (code === 'end') {
+    msg.textContent = state.cards.length ? 'You’ve seen every community post. Write the next one!' : 'No community posts yet. Be the first — tap +.';
+    btn.hidden = true;
+    errorShown = true;
+    return;
+  }
   if (code === 'none') {
-    msg.textContent = state.tab === 'mix' ? 'All sources are switched off. Turn some on in Settings.' : 'This source is switched off or unreachable right now.';
+    msg.textContent = state.tab === 'mix' ? 'Nothing matches your filters and sources. Try widening them.' : 'This source is switched off or unreachable right now.';
+  } else if (activeFilterCount()) {
+    msg.textContent = 'Couldn’t find anything matching your filters just now. Try widening them, or try again.';
   } else {
     msg.textContent = navigator.onLine === false ? "You're offline. Connect to keep scrolling." : "Couldn't reach the maths sources just now.";
   }
   btn.hidden = false;
   btn.onclick = () => { state.failures = {}; btn.hidden = true; msg.textContent = 'Finding something good…'; fill(); };
+  if (activeFilterCount() && !$('#loaderFilters')) {
+    const f = h('<button class="btn ghost" id="loaderFilters">Filters</button>');
+    f.addEventListener('click', openFilters);
+    btn.after(f);
+  }
   errorShown = true;
 }
 
 // ------------------------------------------------------------------ cards
 const SOURCE_META = {
   contest: { tag: 'Problem', cls: 's-contest', from: 'AoPS Wiki' },
+  math: { tag: 'Problem', cls: 's-math', from: 'MATH' },
+  omni: { tag: 'Problem', cls: 's-omni', from: 'Omni-MATH' },
   aops: { tag: 'Problem', cls: 's-aops', from: 'AoPS forum' },
   olympiad: { tag: 'Problem', cls: 's-olympiad', from: 'Olympiad' },
   wikipedia: { tag: 'Concept', cls: 's-wiki', from: 'Wikipedia' },
@@ -349,10 +449,10 @@ const SOURCE_META = {
   post: { tag: 'Post', cls: 's-post', from: '' },
 };
 const metaFor = (d) => {
-  if (d.source === 'post') return { ...SOURCE_META.post, tag: d.kind || 'Post', from: `by ${d.author}` };
+  if (d.source === 'post') return { ...SOURCE_META.post, tag: d.kind || 'Post', from: `${d.cloudId ? '' : 'by '}${d.author}${d.date ? ` · ${timeAgo(d.date)}` : ''}` };
   return SOURCE_META[d.source] || SOURCE_META.wikipedia;
 };
-const isProblem = (d) => ['contest', 'aops', 'olympiad'].includes(d.source) || (d.source === 'post' && d.postKind === 'problem');
+const isProblem = (d) => ['contest', 'aops', 'olympiad', 'math', 'omni'].includes(d.source) || (d.source === 'post' && d.postKind === 'problem');
 const inList = (key, id) => state[key].some((s) => s.id === id);
 
 function buildCard(data, { standalone = false, onAnswered = null } = {}) {
@@ -362,12 +462,13 @@ function buildCard(data, { standalone = false, onAnswered = null } = {}) {
   const el = h(`<section class="card ${meta.cls}" data-id="${escapeHTML(data.id)}">
     <div class="card-inner">
       ${data.banner ? `<div class="shared-banner">${escapeHTML(data.banner)}</div>` : ''}
-      <div class="meta"><span class="pill">${escapeHTML(meta.tag)}</span><span class="where">${escapeHTML(meta.from)}</span></div>
+      <div class="meta"><span class="pill">${escapeHTML(meta.tag)}</span><span class="where">${escapeHTML(meta.from)}</span>${diffChip(data)}</div>
       <h2 class="heading">${escapeHTML(data.heading)}</h2>
       <div class="content"></div>
     </div>
     <nav class="rail">
-      <button class="rail-btn like ${isLiked ? 'on' : ''}" aria-label="Like" aria-pressed="${isLiked}">${ICONS.heart}<span>Like</span></button>
+      <button class="rail-btn like ${isLiked ? 'on' : ''}" aria-label="Like" aria-pressed="${isLiked}">${ICONS.heart}<span>${data.cloudId ? data.likeCount : 'Like'}</span></button>
+      ${data.cloudId ? `<button class="rail-btn comments" aria-label="Comments">${ICONS.chat}<span>${data.commentCount}</span></button>` : ''}
       <button class="rail-btn save ${isSaved ? 'on' : ''}" aria-label="Save" aria-pressed="${isSaved}">${ICONS.bookmark}<span>Save</span></button>
       ${data.solutionHtml ? `<button class="rail-btn sol" aria-label="${data.solutionLabel}">${ICONS.bulb}<span>${data.solutionLabel}</span></button>` : ''}
       <button class="rail-btn share" aria-label="Share">${ICONS.share}<span>Share</span></button>
@@ -385,7 +486,11 @@ function buildCard(data, { standalone = false, onAnswered = null } = {}) {
   if (data.terms && data.terms.length) content.appendChild(termsGame(data, el));
   if (isProblem(data)) content.appendChild(answerBox(data, el, onAnswered));
 
-  $('.like', el).addEventListener('click', (e) => toggleList('liked', data, e.currentTarget));
+  $('.like', el).addEventListener('click', (e) => (data.cloudId ? toggleCloudLike(data, e.currentTarget) : toggleList('liked', data, e.currentTarget)));
+  $('.comments', el)?.addEventListener('click', () => openComments(data));
+  if (data.cloudId && cloud.currentUser()) {
+    cloud.myLikes([data.cloudId]).then((set) => { if (set.has(data.cloudId)) { const b = $('.like', el); b.classList.add('on'); b.setAttribute('aria-pressed', 'true'); } }).catch(() => {});
+  }
   $('.save', el).addEventListener('click', (e) => toggleList('saved', data, e.currentTarget));
   $('.sol', el)?.addEventListener('click', () => openSolution(data));
   $('.share', el).addEventListener('click', () => share(data));
@@ -393,11 +498,80 @@ function buildCard(data, { standalone = false, onAnswered = null } = {}) {
 
   // Fade hint when content overflows.
   const inner = $('.card-inner', el);
-  const checkOverflow = () => inner.classList.toggle('overflows', inner.scrollHeight - inner.scrollTop - inner.clientHeight > 8);
+  let more = null;
+  const checkOverflow = () => {
+    const hidden = inner.scrollHeight - inner.scrollTop - inner.clientHeight > 8;
+    inner.classList.toggle('overflows', hidden);
+    // Long card: offer to read it all in a sheet (scrolling inside a swipe feed can be fiddly on phones).
+    if (!standalone && inner.scrollHeight > inner.clientHeight + 40 && !more) {
+      more = h('<button class="read-more">Read full ↓</button>');
+      more.addEventListener('click', () => openCard(data));
+      el.appendChild(more);
+    }
+    if (more) more.hidden = !hidden;
+  };
   inner.addEventListener('scroll', checkOverflow, { passive: true });
+  inner.querySelectorAll('img').forEach((img) => img.addEventListener('load', checkOverflow));
   requestAnimationFrame(checkOverflow);
+  setTimeout(checkOverflow, 400);
   el._checkOverflow = checkOverflow;
   return el;
+}
+
+// ------------------------------------------------------------------ difficulty
+const BANDS = [
+  { id: 'easy', name: 'Easy', max: 2.5 },
+  { id: 'medium', name: 'Medium', max: 4.5 },
+  { id: 'hard', name: 'Hard', max: 6.5 },
+  { id: 'expert', name: 'Expert', max: 11 },
+];
+const bandOf = (d) => BANDS.find((b) => d <= b.max) || BANDS[3];
+function diffChip(data) {
+  if (data.difficulty == null) return '';
+  const b = bandOf(data.difficulty);
+  const val = data.rated ? data.difficulty.toFixed(1) : `~${data.difficulty}`;
+  return `<span class="diff d-${b.id}" title="Difficulty ${val} out of 10${data.rated ? '' : ' (estimated)'}"><i></i>${b.name} · ${val}</span>`;
+}
+// Elo-style skill rating: beating a problem rated above you moves you up more.
+function updateRating(data, ok) {
+  if (data.difficulty == null) return;
+  const st = state.stats;
+  const pr = difficultyToRating(data.difficulty);
+  const expected = 1 / (1 + 10 ** ((pr - st.rating) / 400));
+  const k = (st.answered || 0) < 30 ? 48 : 28;
+  const weight = data.rated ? 1 : 0.6; // estimated difficulties count for less
+  st.rating = Math.round(Math.max(100, st.rating + k * weight * ((ok ? 1 : 0) - expected)));
+  st.ratingHistory = [...(st.ratingHistory || []), st.rating].slice(-60);
+  const band = bandOf(data.difficulty).id;
+  st.byBand = st.byBand || {};
+  st.byBand[band] = st.byBand[band] || { a: 0, c: 0 };
+  st.byBand[band].a++; if (ok) st.byBand[band].c++;
+  const topic = data.topic && data.topic !== 'unknown' ? data.topic : 'Other';
+  st.byTopic = st.byTopic || {};
+  st.byTopic[topic] = st.byTopic[topic] || { a: 0, c: 0 };
+  st.byTopic[topic].a++; if (ok) st.byTopic[topic].c++;
+}
+function sparkline(vals) {
+  if (vals.length < 2) return '';
+  const w = 280; const hgt = 48;
+  const lo = Math.min(...vals) - 10; const hi = Math.max(...vals) + 10;
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * w},${hgt - ((v - lo) / (hi - lo)) * hgt}`).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${w} ${hgt}" preserveAspectRatio="none"><polyline points="${pts}"/></svg>`;
+}
+function skillsSection() {
+  const st = state.stats;
+  const row = (label, rec) => {
+    const pct = rec.a ? Math.round((100 * rec.c) / rec.a) : 0;
+    return `<div class="skill"><span>${escapeHTML(label)}</span><div class="bar"><span style="width:${pct}%"></span></div><small>${rec.a ? `${pct}% · ${rec.a}` : '—'}</small></div>`;
+  };
+  const bands = BANDS.map((b) => row(b.name, (st.byBand || {})[b.id] || { a: 0, c: 0 })).join('');
+  const topics = Object.entries(st.byTopic || {}).sort((a, b) => b[1].a - a[1].a).slice(0, 8).map(([t, r]) => row(t, r)).join('');
+  const level = Math.max(1, Math.min(10, (st.rating - 600) / 160));
+  return `<details class="skills" open><summary><b>Skill rating</b><span class="rating">${st.rating}</span></summary>
+    <p class="small">Goes up when you solve problems, more for harder ones. You're working at about <b>${level.toFixed(1)}/10</b> (${bandOf(level).name}).</p>
+    ${sparkline(st.ratingHistory || [])}
+    <h4>By difficulty</h4>${bands}
+    ${topics ? `<h4>By topic</h4>${topics}` : ''}</details>`;
 }
 
 // Show the first terms of a sequence and let the person guess the next one.
@@ -453,7 +627,8 @@ function attachDoubleTap(el, data) {
     const now = Date.now();
     if (now - last < 320) {
       last = 0;
-      if (!inList('liked', data.id)) toggleList('liked', data, $('.like', el));
+      const likeBtn = $('.like', el);
+      if (data.cloudId) { if (!likeBtn.classList.contains('on')) toggleCloudLike(data, likeBtn); } else if (!inList('liked', data.id)) toggleList('liked', data, likeBtn);
       const heart = h(`<div class="big-heart" aria-hidden="true">${ICONS.heart}</div>`);
       const r = el.getBoundingClientRect();
       heart.style.left = `${e.clientX - r.left}px`;
@@ -494,6 +669,7 @@ function answerBox(data, cardEl, onAnswered = null) {
     return box;
   }
   const finish = (ok) => {
+    updateRating(data, ok);
     state.stats.answered++;
     const d = dayRec();
     d.answered++;
@@ -636,7 +812,10 @@ async function shareText(text) {
 async function share(data) {
   let url = data.url;
   let text = `${data.heading} — via MathScroll`;
-  if (data.source === 'post') {
+  if (data.cloudId) {
+    url = `${PUBLIC_URL}#post=${data.cloudId}`;
+    text = `${data.heading} — by ${data.author} on MathScroll`;
+  } else if (data.source === 'post') {
     url = await postLink(data.post);
     text = `${data.heading} — a maths ${data.kind.toLowerCase()} on MathScroll`;
   }
@@ -657,6 +836,7 @@ const observer = new IntersectionObserver((entries) => {
       if (prev && Date.now() - currentSince < 1200) engage(prev.data.source, -0.3);
       currentEl = e.target;
       currentSince = Date.now();
+      e.target._checkOverflow?.();
       const c = state.cards.find((x) => x.el === e.target);
       if (c) markSeen(c.data.id);
       fill();
@@ -735,6 +915,125 @@ function openCard(data, title) {
   markSeen(data.id);
 }
 
+// ------------------------------------------------------------------ community: likes, comments, accounts
+async function toggleCloudLike(data, btn) {
+  if (!cloud.currentUser()) { openAuth('Sign in to like posts'); return; }
+  const on = !btn.classList.contains('on');
+  const label = btn.querySelector('span');
+  data.likeCount = Math.max(0, data.likeCount + (on ? 1 : -1));
+  document.querySelectorAll(`.card[data-id="${CSS.escape(data.id)}"] .like`).forEach((b) => { b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); b.querySelector('span').textContent = data.likeCount; });
+  if (on) { btn.classList.remove('pop'); void btn.offsetWidth; btn.classList.add('pop'); }
+  // Keep a local copy too, so it shows under Liked in your profile.
+  const i = state.liked.findIndex((x) => x.id === data.id);
+  if (on && i < 0) state.liked.unshift({ ...data }); else if (!on && i >= 0) state.liked.splice(i, 1);
+  saveList('liked');
+  try { await cloud.setLike(data.cloudId, on); } catch (e) {
+    data.likeCount = Math.max(0, data.likeCount + (on ? -1 : 1));
+    document.querySelectorAll(`.card[data-id="${CSS.escape(data.id)}"] .like`).forEach((b) => { b.classList.toggle('on', !on); b.querySelector('span').textContent = data.likeCount; });
+    toast(e.message);
+  }
+  if (label) label.textContent = data.likeCount;
+}
+
+function openComments(data) {
+  const body = document.createElement('div');
+  body.className = 'comments-sheet';
+  const me = cloud.currentUser();
+  body.innerHTML = `<div class="comment-list"><p class="small">Loading comments…</p></div>
+    ${me ? `<form class="comment-form"><textarea class="field" rows="2" maxlength="1000" placeholder="Add a comment (maths in $…$ works)"></textarea><button class="btn" type="submit">Post</button></form>`
+    : '<button class="btn wide sign-in">Sign in to comment</button>'}
+    <button class="link report-post">${ICONS.flag} Report this post</button>`;
+  const list = $('.comment-list', body);
+  const render = (rows) => {
+    list.innerHTML = rows.length ? '' : '<p class="small">No comments yet. Start the discussion!</p>';
+    for (const c of rows) {
+      const name = c.profiles?.username ? `@${c.profiles.username}` : 'someone';
+      const item = h(`<div class="comment"><div class="c-head"><b>${escapeHTML(name)}</b><small>${timeAgo(Date.parse(c.created_at))}</small>
+        ${me && me.id === c.user_id ? `<button class="icon-btn mini del" aria-label="Delete comment">${ICONS.trash}</button>` : ''}</div></div>`);
+      item.appendChild(renderContent(textToHtml(c.body), { base: 'text' }));
+      item.querySelector('.del')?.addEventListener('click', async () => {
+        try { await cloud.deleteComment(c.id); item.remove(); data.commentCount = Math.max(0, data.commentCount - 1); updateCount(); } catch (e) { toast(e.message); }
+      });
+      list.appendChild(item);
+    }
+  };
+  const updateCount = () => document.querySelectorAll(`.card[data-id="${CSS.escape(data.id)}"] .comments span`).forEach((x) => { x.textContent = data.commentCount; });
+  cloud.listComments(data.cloudId).then(render).catch((e) => { list.innerHTML = `<p class="small">${escapeHTML(e.message)}</p>`; });
+  $('.sign-in', body)?.addEventListener('click', () => openAuth('Sign in to comment'));
+  const form = $('.comment-form', body);
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ta = form.querySelector('textarea');
+    const text = ta.value.trim();
+    if (!text) return;
+    form.querySelector('button').disabled = true;
+    try {
+      await cloud.addComment(data.cloudId, text);
+      ta.value = '';
+      data.commentCount++; updateCount();
+      render(await cloud.listComments(data.cloudId));
+      list.lastElementChild?.scrollIntoView({ block: 'nearest' });
+    } catch (err) { toast(err.message); }
+    form.querySelector('button').disabled = false;
+  });
+  const rep = $('.report-post', body);
+  rep.addEventListener('click', async () => {
+    if (!cloud.currentUser()) { openAuth('Sign in to report'); return; }
+    if (!rep.classList.contains('confirm')) { rep.classList.add('confirm'); rep.lastChild.textContent = ' Tap again to report'; return; }
+    try { await cloud.report({ postId: data.cloudId, reason: 'Reported from app' }); toast('Thanks — reported'); rep.remove(); } catch (e) { toast(e.message); }
+  });
+  openSheet(`Comments · ${data.heading}`, body, 'tall');
+}
+
+function openAuth(reason = '', mode = 'signin') {
+  const body = document.createElement('div');
+  body.className = 'auth';
+  body.innerHTML = `
+    ${reason ? `<p class="auth-reason">${escapeHTML(reason)}</p>` : ''}
+    <div class="segmented auth-tabs"><button data-m="signin">Sign in</button><button data-m="signup">Create account</button></div>
+    <form class="auth-form">
+      <input class="field username" name="username" autocomplete="username" placeholder="Username (3–20 letters, numbers, _)" maxlength="20">
+      <input class="field email" type="email" name="email" autocomplete="email" placeholder="Email" required>
+      <input class="field password" type="password" name="password" autocomplete="current-password" placeholder="Password (6+ characters)" minlength="6" required>
+      <p class="auth-error" hidden></p>
+      <button class="btn wide submit" type="submit"></button>
+    </form>
+    <p class="small">Your username is shown on your posts and comments. Your email is never shown to anyone.</p>`;
+  const setMode = (m) => {
+    mode = m;
+    body.querySelectorAll('.auth-tabs button').forEach((b) => b.setAttribute('aria-checked', b.dataset.m === m));
+    $('.username', body).hidden = m !== 'signup';
+    $('.username', body).required = m === 'signup';
+    $('.password', body).autocomplete = m === 'signup' ? 'new-password' : 'current-password';
+    $('.submit', body).textContent = m === 'signup' ? 'Create account' : 'Sign in';
+    $('.auth-error', body).hidden = true;
+  };
+  body.querySelectorAll('.auth-tabs button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.m)));
+  $('.auth-form', body).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = $('.auth-error', body); const btn = $('.submit', body);
+    const email = $('.email', body).value.trim(); const password = $('.password', body).value; const username = $('.username', body).value.trim();
+    btn.disabled = true; err.hidden = true;
+    try {
+      if (mode === 'signup') {
+        const r = await cloud.signUp({ email, password, username });
+        if (r.needsConfirm) { err.hidden = false; err.classList.add('ok'); err.textContent = 'Almost done — open the confirmation email we sent, then come back and sign in.'; setMode('signin'); err.hidden = false; btn.disabled = false; return; }
+      } else {
+        await cloud.signIn({ email, password });
+      }
+      const u = cloud.currentUser();
+      toast(`Signed in as @${u?.username || 'you'}`);
+      closeSheet();
+      renderTabs();
+    } catch (ex) {
+      err.classList.remove('ok'); err.hidden = false; err.textContent = ex.message;
+    }
+    btn.disabled = false;
+  });
+  setMode(mode);
+  openSheet(mode === 'signup' ? 'Create account' : 'Sign in', body);
+}
+
 // ------------------------------------------------------------------ profile
 let profileTab = 'saved';
 function openProfile() {
@@ -759,6 +1058,20 @@ function openProfile() {
   });
   $('#openSettings', head).addEventListener('click', openSettings);
   body.appendChild(head);
+  if (cloud.cloudEnabled) {
+    const u = cloud.currentUser();
+    const acct = h(u
+      ? `<div class="account"><span>Signed in as <b>@${escapeHTML(u.username || '')}</b></span><button class="btn ghost small sign-out">Sign out</button></div>`
+      : `<div class="account"><span>Sign in to post publicly, like and comment.</span><button class="btn small sign-in">Sign in</button></div>`);
+    acct.querySelector('.sign-out')?.addEventListener('click', async () => { await cloud.signOut(); toast('Signed out'); openProfile(); renderTabs(); });
+    acct.querySelector('.sign-in')?.addEventListener('click', () => openAuth());
+    body.appendChild(acct);
+    if (u) {
+      nameInput.value = u.displayName || u.username || state.profile.name;
+      $('.avatar', head).textContent = (nameInput.value.trim()[0] || '∑').toUpperCase();
+      nameInput.addEventListener('change', () => cloud.updateDisplayName(nameInput.value.trim()).catch((e) => toast(e.message)));
+    }
+  }
 
   body.appendChild(h(`<div class="stats">
     <div><b>${s.correct}</b><span>solved</span></div>
@@ -766,6 +1079,8 @@ function openProfile() {
     <div><b>${s.best}</b><span>best run</span></div>
     <div><b>${dayStreak()}</b><span>day streak</span></div>
   </div>`));
+
+  body.appendChild(h(skillsSection()));
 
   // Today's goal + last 7 days.
   const goal = state.settings.dailyGoal;
@@ -807,6 +1122,31 @@ function openProfile() {
       make.addEventListener('click', () => openCompose());
       list.appendChild(make);
       if (!state.posts.length) list.appendChild(h('<p class="empty">Share a problem you made up, a neat fact or a question. Anyone you send the link to can open it in MathScroll.</p>'));
+      const me = cloud.currentUser();
+      if (me) {
+        const pub = h('<div class="public-posts"><p class="small">Loading your public posts…</p></div>');
+        list.appendChild(pub);
+        cloud.listPosts({ userId: me.id, limit: 50 }).then((rows) => {
+          pub.innerHTML = rows.length ? '<h4 class="list-h">Public</h4>' : '';
+          const ulp = h('<ul class="saved-list"></ul>');
+          for (const row of rows) {
+            const card = cloudCard(row);
+            const li = h(`<li class="s-post"><button class="saved-item"><span class="pill">${escapeHTML(card.kind)}</span><span class="t">${escapeHTML(card.heading)}</span><small>♥ ${card.likeCount} · 💬 ${card.commentCount}</small></button>
+              <button class="icon-btn mini share-post" aria-label="Share">${ICONS.share}</button>
+              <button class="icon-btn mini del-post" aria-label="Delete">${ICONS.trash}</button></li>`);
+            $('.saved-item', li).addEventListener('click', () => openCard(card));
+            $('.share-post', li).addEventListener('click', () => share(card));
+            const del = $('.del-post', li);
+            del.addEventListener('click', async () => {
+              if (!del.classList.contains('confirm')) { del.classList.add('confirm'); toast('Tap the bin again to delete'); setTimeout(() => del.classList.remove('confirm'), 2500); return; }
+              try { await cloud.deletePost(row.id); li.remove(); toast('Deleted'); } catch (e) { toast(e.message); }
+            });
+            ulp.appendChild(li);
+          }
+          pub.appendChild(ulp);
+          if (state.posts.length) pub.appendChild(h('<h4 class="list-h">On this device</h4>'));
+        }).catch((e) => { pub.innerHTML = `<p class="small">${escapeHTML(e.message)}</p>`; });
+      }
       const ul = h('<ul class="saved-list"></ul>');
       state.posts.forEach((post, idx) => {
         const card = postCard(post);
@@ -866,16 +1206,27 @@ function openCompose() {
     <textarea class="field body" rows="6" maxlength="5000" placeholder="Write your problem. Put maths between dollar signs, like $x^2 + y^2 = z^2$.">${escapeHTML(draft.b)}</textarea>
     <input class="field answer" maxlength="80" placeholder="Answer (optional — a number, A–E, or an expression)" value="${escapeHTML(draft.a)}">
     <textarea class="field solution" rows="3" maxlength="8000" placeholder="Solution (optional, hidden until someone taps Solution)">${escapeHTML(draft.s)}</textarea>
+    <div class="compose-extra">
+      <select class="select topic"><option value="">Topic (optional)</option>${PROBLEM_TOPICS.map((t) => `<option ${draft.topic === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <label class="diff-pick">Difficulty <input type="range" min="0" max="10" step="0.5" class="cdiff" value="${draft.difficulty || 0}"><b class="cdiff-v">${draft.difficulty ? draft.difficulty : '–'}</b></label>
+    </div>
+    ${cloud.cloudEnabled ? `<div class="group publish-row">${cloud.currentUser()
+      ? `<label class="row"><span><b>Post publicly</b><small>As @${escapeHTML(cloud.currentUser().username || '')} — everyone sees it in Community</small></span><input type="checkbox" class="switch public" checked></label>`
+      : '<div class="row"><span><b>Want everyone to see it?</b><small>Sign in to post to Community. Otherwise it stays on this device.</small></span><button class="btn small sign-in" type="button">Sign in</button></div>'}</div>` : ''}
     <p class="small preview-label">Preview</p>
     <div class="preview content"></div>
-    <button class="btn wide post-btn">Post & share</button>
-    <p class="small">Posts are saved on this device. Sharing sends a link with the whole post inside it, so anyone can open it — no account needed.</p>`;
+    <button class="btn wide post-btn">Post${cloud.currentUser() ? '' : ' & share'}</button>
+    <p class="small">${cloud.currentUser() ? 'Public posts appear in Community for everyone. Private posts stay on this device and can be shared as a link.' : 'Posts are saved on this device. Sharing sends a link with the whole post inside it, so anyone can open it — no account needed.'}</p>`;
   let kind = draft.k;
   const title = $('.title', body); const text = $('.body', body); const answer = $('.answer', body); const solution = $('.solution', body);
   const preview = $('.preview', body);
   let lastFocus = text;
   [text, solution, title, answer].forEach((f) => f.addEventListener('focus', () => { lastFocus = f; }));
-  const current = () => ({ k: kind, t: title.value.trim(), b: text.value.trim(), a: kind === 'problem' ? answer.value.trim() : '', s: solution.value.trim() });
+  const topicSel = $('.topic', body); const cdiff = $('.cdiff', body);
+  cdiff.addEventListener('input', () => { $('.cdiff-v', body).textContent = Number(cdiff.value) ? cdiff.value : '–'; update(); });
+  topicSel.addEventListener('change', () => update());
+  $('.sign-in', body)?.addEventListener('click', () => openAuth('Sign in to post publicly'));
+  const current = () => ({ k: kind, t: title.value.trim(), b: text.value.trim(), a: kind === 'problem' ? answer.value.trim() : '', s: solution.value.trim(), topic: topicSel.value, difficulty: Number(cdiff.value) || null });
   let timer;
   const update = () => {
     clearTimeout(timer);
@@ -907,6 +1258,26 @@ function openCompose() {
   $('.post-btn', body).addEventListener('click', async () => {
     const d = current();
     if (d.b.length < 5) { text.classList.add('shake'); setTimeout(() => text.classList.remove('shake'), 400); toast('Write something first'); return; }
+    const pubBox = $('.public', body);
+    const btn = $('.post-btn', body);
+    if (pubBox?.checked && cloud.currentUser()) {
+      btn.disabled = true; btn.textContent = 'Posting…';
+      try {
+        const row = await cloud.createPost({ ...d, difficulty: d.difficulty && d.difficulty >= 1 ? d.difficulty : null });
+        store.set(DRAFT_KEY, { k: kind, t: '', b: '', a: '', s: '' });
+        state.posts.unshift({ ...d, n: `@${cloud.currentUser().username}`, d: Date.now(), id: `c${row.id}`, cloudId: row.id });
+        saveList('posts'); checkBadges();
+        const card = cloudCard({ ...row, profiles: { username: cloud.currentUser().username } });
+        openCard(card, 'Your post');
+        toast('Posted to Community');
+        community.recent = null;
+        return;
+      } catch (e) {
+        btn.disabled = false; btn.textContent = 'Post & share';
+        toast(e.message);
+        return;
+      }
+    }
     const post = { ...d, n: state.profile.name, d: Date.now(), id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}` };
     state.posts.unshift(post);
     saveList('posts');
@@ -988,7 +1359,7 @@ const SPRINT_LEN = 10;
 async function answerableProblem() {
   for (let i = 0; i < 8; i++) {
     try {
-      const c = await SOURCES.contest.fetch(state.settings);
+      const c = await SOURCES.contest.fetch(fetchSettings());
       if (c.answer && (c.answer.type === 'choice' || c.answer.type === 'numeric')) return c;
     } catch { /* try again */ }
   }
@@ -1050,6 +1421,106 @@ function openSprint() {
   show();
 }
 
+// ------------------------------------------------------------------ filters
+function activeFilterCount() {
+  const f = filters(); const d = DEFAULT_FILTERS;
+  let n = 0;
+  if (f.matchLevel || f.dmin !== d.dmin || f.dmax !== d.dmax) n++;
+  if (!f.unrated) n++;
+  if (f.qtype !== 'any') n++;
+  if (f.checkable) n++;
+  if (!f.hideSeen) n++;
+  if (f.oeisClassic) n++;
+  if (f.wikiTopics.length !== d.wikiTopics.length) n++;
+  if (state.settings.topics.length !== PROBLEM_TOPICS.length) n++;
+  return n;
+}
+function openFilters() {
+  const f = filters();
+  const st = state.settings;
+  let changed = false;
+  const mark = () => { changed = true; saveSettings(); };
+  const body = document.createElement('div');
+  body.className = 'settings filters';
+  body.innerHTML = `
+    <h3>Difficulty</h3>
+    <div class="group pad">
+      <div class="range-row"><span>From</span><input type="range" min="1" max="10" step="0.5" class="dmin" value="${f.dmin}"><b class="dmin-v">${f.dmin}</b></div>
+      <div class="range-row"><span>To</span><input type="range" min="1" max="10" step="0.5" class="dmax" value="${f.dmax}"><b class="dmax-v">${f.dmax}</b></div>
+      <p class="small range-help"></p>
+    </div>
+    <div class="group">
+      <label class="row"><span><b>Match my level</b><small>Picks problems around your skill rating (${state.stats.rating})</small></span><input type="checkbox" class="switch match" ${f.matchLevel ? 'checked' : ''}></label>
+      <label class="row"><span><b>Include unrated problems</b><small>AMC/AIME, AoPS and olympiad problems have estimated difficulty</small></span><input type="checkbox" class="switch unrated" ${f.unrated ? 'checked' : ''}></label>
+    </div>
+    <h3>Answer type</h3>
+    <div class="segmented qtype" role="radiogroup">
+      ${[['any', 'Any'], ['mcq', 'A–E'], ['number', 'Answer'], ['proof', 'Proof']].map(([k, v]) => `<button role="radio" data-k="${k}" aria-checked="${f.qtype === k}">${v}</button>`).join('')}
+    </div>
+    <div class="group" style="margin-top:10px">
+      <label class="row"><span><b>Only problems I can check</b><small>Multiple choice or a number answer</small></span><input type="checkbox" class="switch checkable" ${f.checkable ? 'checked' : ''}></label>
+      <label class="row"><span><b>Skip cards I've seen</b></span><input type="checkbox" class="switch hideseen" ${f.hideSeen ? 'checked' : ''}></label>
+    </div>
+    <h3>Problem topics</h3>
+    <div class="chips topics">${PROBLEM_TOPICS.map((t) => `<button class="chip ${st.topics.includes(t) ? 'on' : ''}" data-t="${t}">${t === 'Combinatorics' ? 'Combinatorics & graphs' : t}</button>`).join('')}</div>
+    <h3>Concept topics (Wikipedia)</h3>
+    <div class="chips wiki">${Object.entries(WIKI_GROUP_NAMES).map(([k, v]) => `<button class="chip ${f.wikiTopics.includes(k) ? 'on' : ''}" data-w="${k}">${v}</button>`).join('')}</div>
+    <h3>Sources</h3>
+    <div class="chips srcs">${Object.entries(SOURCES).map(([k, v]) => `<button class="chip ${st.sources[k] ? 'on' : ''}" data-s="${k}">${v.label}</button>`).join('')}</div>
+    <div class="group" style="margin-top:10px">
+      <label class="row"><span><b>Classic sequences only</b><small>The well-known OEIS sequences</small></span><input type="checkbox" class="switch classic" ${f.oeisClassic ? 'checked' : ''}></label>
+    </div>
+    <button class="btn ghost wide reset-f">Reset filters</button>`;
+  const dmin = $('.dmin', body); const dmax = $('.dmax', body);
+  const help = () => {
+    const [lo, hi] = difficultyWindow({ ...st, rating: state.stats.rating });
+    const name = (d) => bandOf(d).name.toLowerCase();
+    $('.range-help', body).textContent = f.matchLevel
+      ? `Matching your level: ${lo.toFixed(1)}–${hi.toFixed(1)} (${name(lo)} to ${name(hi)}).`
+      : `${lo}–${hi}: ${name(lo)} to ${name(hi)}. AMC 10/12 ≈ 2–4, AIME ≈ 4–6, olympiads ≈ 6–10.`;
+    dmin.disabled = dmax.disabled = f.matchLevel;
+  };
+  const onRange = (e) => {
+    let a = Number(dmin.value); let b = Number(dmax.value);
+    if (a > b) { if (e.target === dmin) b = a; else a = b; dmin.value = a; dmax.value = b; }
+    f.dmin = a; f.dmax = b;
+    $('.dmin-v', body).textContent = a; $('.dmax-v', body).textContent = b;
+    help(); mark();
+  };
+  dmin.addEventListener('input', onRange); dmax.addEventListener('input', onRange);
+  const bindSwitch = (cls, key) => $(cls, body).addEventListener('change', (e) => { f[key] = e.target.checked; help(); mark(); });
+  bindSwitch('.match', 'matchLevel'); bindSwitch('.unrated', 'unrated'); bindSwitch('.checkable', 'checkable'); bindSwitch('.hideseen', 'hideSeen'); bindSwitch('.classic', 'oeisClassic');
+  body.querySelectorAll('.qtype button').forEach((b) => b.addEventListener('click', () => {
+    f.qtype = b.dataset.k; body.querySelectorAll('.qtype button').forEach((x) => x.setAttribute('aria-checked', x === b)); mark();
+  }));
+  const chipGroup = (sel, attr, get, set) => body.querySelectorAll(`${sel} .chip`).forEach((c) => c.addEventListener('click', () => {
+    c.classList.toggle('on');
+    const on = [...body.querySelectorAll(`${sel} .chip.on`)].map((x) => x.dataset[attr]);
+    if (!on.length) { c.classList.add('on'); toast('Keep at least one'); return; }
+    set(on); mark();
+  }));
+  chipGroup('.topics', 't', null, (on) => { st.topics = on; });
+  chipGroup('.wiki', 'w', null, (on) => { f.wikiTopics = on; });
+  chipGroup('.srcs', 's', null, (on) => { Object.keys(SOURCES).forEach((k) => { st.sources[k] = on.includes(k); }); state.failures = {}; });
+  $('.reset-f', body).addEventListener('click', () => {
+    state.settings.filters = { ...DEFAULT_FILTERS };
+    st.topics = [...PROBLEM_TOPICS];
+    Object.keys(SOURCES).forEach((k) => { st.sources[k] = true; });
+    changed = true; saveSettings();
+    openFilters();
+  });
+  help();
+  const apply = () => {
+    if (!changed) return;
+    changed = false;
+    if (state.tab !== 'mix' && !st.sources[state.tab]) state.tab = 'mix';
+    state.failures = {};
+    renderTabs(); resetFeed();
+  };
+  apply.onReplace = true;
+  openSheet('Filters', body, '', apply);
+}
+
 // ------------------------------------------------------------------ settings
 function openSettings() {
   const st = state.settings;
@@ -1068,6 +1539,9 @@ function openSettings() {
   }
   body.appendChild(srcList);
 
+  const fbtn = h('<button class="btn ghost wide">Difficulty, topics & more filters…</button>');
+  fbtn.addEventListener('click', openFilters);
+  body.appendChild(fbtn);
   body.appendChild(h('<h3>Problem topics</h3>'));
   const topicList = h('<div class="group"></div>');
   for (const t of PROBLEM_TOPICS) {
@@ -1175,6 +1649,19 @@ $('#searchBtn').addEventListener('click', () => openSearch());
 
 // ------------------------------------------------------------------ boot
 async function readSharedPost() {
+  const pm = location.hash.match(/^#post=(\d+)$/);
+  if (pm && cloud.cloudEnabled) {
+    try {
+      const row = await cloud.getPost(pm[1]);
+      if (row) {
+        const card = { ...cloudCard(row), banner: 'Shared with you' };
+        state.pins = [card, ...state.pins.filter((x) => x.id !== card.id && !x.banner?.startsWith('Shared'))];
+        state.justShared = true;
+      } else toast('That post was deleted');
+    } catch { toast('Couldn’t load that post'); }
+    history.replaceState(null, '', location.pathname + location.search);
+    return;
+  }
   const m = location.hash.match(/^#p=([zj][A-Za-z0-9_-]+)$/);
   if (!m) return;
   try {
