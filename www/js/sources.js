@@ -1,3 +1,4 @@
+import { exprValue, cleanTex } from './expr.js';
 // Content sources. Each returns a "card":
 // { id, source, kind, heading, url, html, solutionHtml?, solutionLabel?, answer?, terms?, base, dollarMath? }
 //
@@ -275,6 +276,8 @@ export function answerFor(problem, answer, questionType) {
     if (hits.length === 1) return { type: 'choice', value: hits[0][0] };
   }
   if (/^-?\d{1,6}$/.test(a)) return { type: 'numeric', value: String(parseInt(a, 10)) };
+  const num = exprValue(a);
+  if (Number.isFinite(num)) return { type: 'expr', value: cleanTex(a), num };
   if (questionType !== 'proof' && a.length < 80) return { type: 'reveal', value: a };
   return null;
 }
@@ -320,7 +323,7 @@ function numinaWhere(source, topics, qtype = 'any') {
   if (qtype === 'proof') w += ` AND "question_type"='proof'`;
   return w;
 }
-const isCheckable = (c) => c.answer && (c.answer.type === 'choice' || c.answer.type === 'numeric');
+const isCheckable = (c) => c.answer && (c.answer.type === 'choice' || c.answer.type === 'numeric' || c.answer.type === 'expr');
 
 function searchLink(problem, site) {
   const plain = String(problem).replace(/\$[^$]*\$/g, ' ').replace(/\\[a-z]+/gi, ' ').replace(/[^\w\s'-]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -814,6 +817,36 @@ export async function mathProblem({ config = null, levels = [3] } = {}) {
     if (isCheckable(card)) return card;
   }
   throw new Error('no matching problem');
+}
+
+// Olympiad problems for Learn: Omni-MATH rows in a difficulty band and topic, with checkable answers.
+// Pulls 100 rows at a time and keeps the usable ones, so a lesson needs only a request or two.
+const OLY_TOPIC = { nt: /Number Theory/i, comb: /Combinatorics|Discrete Math|Probability|Graph/i, alg: /Algebra|Inequalit|Sequence|Polynomial|Functional|Precalculus|Calculus/i, geo: /Geometry/i };
+const olyPools = {};
+export async function olympiadProblem({ topic = null, lo = 1, hi = 10, exclude = new Set() } = {}) {
+  const where = `"difficulty" >= ${lo} AND "difficulty" < ${hi}`;
+  const key = `${topic}|${where}`;
+  const pool = (olyPools[key] ||= []);
+  const url = (off, len) => `${HF}/filter?dataset=${encodeURIComponent(OMNI_DS)}&config=default&split=test&where=${encodeURIComponent(where)}&offset=${off}&length=${len}`;
+  const tkey = `${OMNI_DS}|default|test|${where}`;
+  for (let tries = 0; tries < 4 && !pool.some((c) => !exclude.has(c.id)); tries++) {
+    let total = totals[tkey];
+    if (total == null) { const first = await getJSON(url(0, 1)); rememberTotal(tkey, first.num_rows_total); total = first.num_rows_total; }
+    if (!total) break;
+    const data = await getJSON(url(rand(Math.max(1, total - 99)), 100));
+    for (const r of data.rows || []) {
+      const dom = Array.isArray(r.row.domain) ? r.row.domain.join('; ') : String(r.row.domain || '');
+      if (topic && OLY_TOPIC[topic] && !OLY_TOPIC[topic].test(dom)) continue;
+      if (!r.row.problem) continue;
+      const card = omniCard(r.row, r.row_idx);
+      if (isCheckable(card) && !pool.some((c) => c.id === card.id)) pool.push(card);
+    }
+  }
+  const choices = pool.filter((c) => !exclude.has(c.id));
+  if (!choices.length) throw new Error('no matching problem');
+  const card = choices[rand(choices.length)];
+  pool.splice(pool.indexOf(card), 1);
+  return card;
 }
 
 // ------------------------------------------------------------------ chess puzzles (Lichess, CC0)

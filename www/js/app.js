@@ -1,7 +1,8 @@
-import { SOURCES, PROBLEM_TOPICS, escapeHTML, textToHtml, answerFor, searchAll, dailyChallenge, DEFAULT_FILTERS, difficultyToRating, difficultyWindow, WIKI_GROUP_NAMES, numinaByIndex, mathProblem, chessPuzzle, MATH_SUBJECTS } from './sources.js';
+import { SOURCES, PROBLEM_TOPICS, escapeHTML, textToHtml, answerFor, searchAll, dailyChallenge, DEFAULT_FILTERS, difficultyToRating, difficultyWindow, WIKI_GROUP_NAMES, numinaByIndex, mathProblem, chessPuzzle, MATH_SUBJECTS, olympiadProblem } from './sources.js';
 import { renderContent } from './render.js';
+import { exprValue, sameValue } from './expr.js';
 import * as cloud from './cloud.js';
-import { openGames, mount24, GAMES } from './games.js';
+import { openGames, mount24, GAMES, payOrSolve } from './games.js';
 import { openLearn } from './learn.js';
 
 // Where shared post links point. On the website it's the site itself; inside the iOS app it's the public site.
@@ -1208,6 +1209,7 @@ function answerBox(data, cardEl, onAnswered = null) {
     cardEl.classList.add(ok ? 'solved' : 'missed');
     const fb = h(`<div class="feedback ${ok ? 'ok' : 'no'}">${ok ? 'Correct! <span class="charge-earned">+1 ⚡</span>' : `Not quite — the answer is <b>${escapeHTML(data.answer.value)}</b>.`}${data.solutionHtml ? ' <button class="link">See solution</button>' : ''}</div>`);
     fb.querySelector('.link')?.addEventListener('click', () => openSolution(data));
+    if (!ok && data.answer.type === 'expr') { const b = fb.querySelector('b'); b.textContent = ''; b.appendChild(renderContent(`<span>$${escapeHTML(data.answer.value)}$</span>`, { base: 'text', dollar: true })); }
     if (data.daily) {
       const brag = h('<button class="link brag">Share result</button>');
       brag.addEventListener('click', () => shareText(ok
@@ -1233,6 +1235,21 @@ function answerBox(data, cardEl, onAnswered = null) {
       row.appendChild(b);
     }
     box.appendChild(row);
+  } else if (data.answer.type === 'expr') {
+    const form = h(`<form class="numeric expr"><input inputmode="text" maxlength="60" placeholder="e.g. 3/4, 2sqrt(3), pi/6" aria-label="Your answer" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn" type="submit">Check</button></form>`);
+    const preview = h('<p class="expr-preview small"></p>');
+    const input = form.querySelector('input');
+    input.addEventListener('input', () => { const v = exprValue(input.value); preview.textContent = input.value.trim() ? (Number.isFinite(v) ? `≈ ${+v.toPrecision(8)}` : 'Type a number or expression') : ''; });
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const v = exprValue(input.value);
+      if (!Number.isFinite(v)) { input.classList.add('shake'); setTimeout(() => input.classList.remove('shake'), 400); preview.textContent = 'Couldn’t read that — try something like 3/4 or 2sqrt(3)'; return; }
+      input.blur(); input.disabled = true; form.querySelector('button').disabled = true;
+      const ok = sameValue(v, data.answer.num ?? exprValue(data.answer.value));
+      input.classList.add(ok ? 'right' : 'wrong');
+      finish(ok);
+    });
+    box.append(form, preview);
   } else {
     const form = h(`<form class="numeric"><input inputmode="numeric" maxlength="7" placeholder="Your answer" aria-label="Your answer" autocomplete="off"><button class="btn" type="submit">Check</button></form>`);
     form.addEventListener('submit', (e) => {
@@ -2021,7 +2038,7 @@ const GAME_LEVELS = {
   easy: { name: 'Easy', desc: 'MATH levels 1–2: quick warm-ups', levels: [1, 2] },
   medium: { name: 'Medium', desc: 'MATH levels 3–4: a minute or two each', levels: [3, 4] },
   hard: { name: 'Hard', desc: 'MATH level 5 and AMC problems', levels: [5], contest: [3, 5.5] },
-  expert: { name: 'Expert', desc: 'Hard AMC and AIME problems', contest: [5, 8] },
+  expert: { name: 'Expert', desc: 'Hard AMC/AIME and olympiad problems', contest: [5, 8], oly: { lo: 4, hi: 6.5 } },
 };
 function pickGameLevel(done) {
   const cur = state.settings.gameLevel || 'medium';
@@ -2032,7 +2049,7 @@ function pickGameLevel(done) {
 async function contestBetween([lo, hi]) {
   const fs = { ...fetchSettings(), filters: { ...(state.settings.filters || {}), dmin: lo, dmax: hi, matchLevel: false, checkable: true, qtype: 'any' } };
   for (let i = 0; i < 6; i++) {
-    try { const c = await SOURCES.contest.fetch(fs); if (c.answer && (c.answer.type === 'choice' || c.answer.type === 'numeric')) return c; } catch { /* again */ }
+    try { const c = await SOURCES.contest.fetch(fs); if (c.answer && ['choice', 'numeric', 'expr'].includes(c.answer.type)) return c; } catch { /* again */ }
   }
   throw new Error('no problems');
 }
@@ -2042,6 +2059,8 @@ async function quickProblem() {
   for (let i = 0; i < 3; i++) {
     try {
       if (L.levels && (!L.contest || Math.random() < 0.5)) return await mathProblem({ levels: L.levels });
+      if (L.contest && Math.random() < 0.5) return await contestBetween(L.contest);
+      if (L.oly) return await olympiadProblem(L.oly);
       if (L.contest) return await contestBetween(L.contest);
     } catch { /* try again */ }
   }
@@ -2258,7 +2277,15 @@ const learnCtx = {
   subjects: MATH_SUBJECTS,
   progress: () => (state.stats.learn ||= { course: null, done: {}, lessons: 0 }),
   save: () => saveStats(),
-  fetchProblem: (config, level) => mathProblem({ config, levels: [level] }),
+  async fetchProblem(spec, seen) {
+    if (spec.kind === 'math') return mathProblem({ config: spec.config, levels: [spec.level] });
+    try { return await olympiadProblem({ topic: spec.topic, lo: spec.lo, hi: spec.hi, exclude: seen }); } catch {
+      return olympiadProblem({ topic: null, lo: spec.lo, hi: spec.hi, exclude: seen }); // not enough of this topic at this level
+    }
+  },
+  renderText: (t) => renderContent(textToHtml(t), { base: 'text', dollar: true }),
+  chest(charges, xp) { state.stats.charges = gameCtx.charges() + charges; gainXp(xp); saveStats(); sound('chest'); },
+  payOrSolve: (what) => payOrSolve(gameCtx, what),
   mountProblem(box, card, onAnswered) {
     const el = buildCard(card, { standalone: true, onAnswered });
     el.querySelectorAll('.rail, .read-more, .hint-btn').forEach((x) => x.remove());
