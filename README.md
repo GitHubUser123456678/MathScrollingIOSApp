@@ -4,15 +4,18 @@ An endless, swipe-up feed of maths — like TikTok, but every "video" is a conte
 
 **What's in the feed**
 
-| Tab | Source | Size |
-|---|---|---|
-| Contests | AMC 8, AJHSME, AMC 10/12, AHSME, AIME I/II, USAJMO, USAMO, IMO problems from the AoPS Wiki | ~7,000 problems |
-| Concepts | Maths articles on Wikipedia (number theory, geometry, combinatorics, algebra, analysis, topology, logic…) | tens of thousands |
-| Proofs | Theorems with proofs from ProofWiki | ~25,000 |
-| Sequences | The OEIS (mostly the "nice" ones, sometimes fully random) | ~380,000 |
-| AoPS Wiki | Random AoPS Wiki article | everything else on AoPS |
+| Tab | What | Size | Where it comes from |
+|---|---|---|---|
+| AMC/AIME | AMC 8/10/12 and AIME problems, with the AoPS Wiki solutions | ~5,000 | NuminaMath dataset (Hugging Face) |
+| AoPS | Problems posted on the AoPS forums, with solutions | ~33,000 | NuminaMath dataset |
+| Olympiad | Olympiad problems from around the world, with solutions | ~157,000 | NuminaMath dataset |
+| Proofs | ProofWiki theorems with their proofs | ~24,800 | NaturalProofs dataset (a ProofWiki snapshot) |
+| Sequences | The entire OEIS | ~392,000 | OEIS mirror on Hugging Face |
+| Concepts | Maths articles: number theory, abstract algebra, graph theory, combinatorics, geometry, analysis, topology… | thousands | Wikipedia, live |
 
-**Features:** swipe one card at a time · tap A–E (or type an AIME answer) and it's checked against the official answer key · streak counter · solutions and proofs slide up in a sheet · save cards · share · difficulty filter (easy/medium/hard by problem position) · choose which contests you see · maths typeset with KaTeX · works offline for the app itself (content needs internet).
+Why the mirrors? AoPS puts every automated request through a bot check, and ProofWiki and the OEIS don't allow other websites/apps to read them. Hugging Face hosts public copies of their content with an open API, so the app reads those instead. Every card's **Source** button takes you to the original.
+
+**Features:** swipe one card at a time · tap A–E or type a numeric answer and it's checked · streak counter · solutions and proofs slide up in a sheet · save cards · share · filter problems by topic (algebra, number theory, combinatorics incl. graph theory, geometry, inequalities, calculus) · maths typeset with KaTeX · the app itself works offline (content needs internet).
 
 No API keys, no server, no accounts. Everything is free and public.
 
@@ -56,8 +59,6 @@ You're on Windows, and building iPhone apps normally needs a Mac. GitHub gives y
 
 It opens full-screen with its own icon, like a normal app. Updates appear automatically whenever you push changes.
 
-> Heads-up: in a browser, each site has to allow being read by other websites (CORS). Wikipedia and ProofWiki do. If AoPS or the OEIS ever block it, the app quietly skips that source and keeps scrolling — Settings will show "unreachable right now". The native app in Option B doesn't have this limit, so every source always works there.
-
 ## Option B — real iOS app installed from your PC (free)
 
 **1. Build the IPA (on GitHub's Mac):**
@@ -97,9 +98,9 @@ Push your changes with GitHub Desktop (Commit → Push). Both workflows re-run a
 
 Ideas to tune:
 - `weights` in `js/app.js` sets how often each source shows up in *For you*.
-- `CONTESTS` in `js/sources.js` lists every contest and year. Add more (e.g. HMMT, if the AoPS Wiki has pages for them).
-- `WIKI_CATEGORY_GROUPS` controls which Wikipedia topics appear.
+- `WIKI_CATEGORY_GROUPS` in `js/sources.js` controls which Wikipedia topics appear.
+- `SOURCES` in `js/sources.js` lists every source; each one is a small function you can copy to add another Hugging Face dataset.
 
 ## Credits
 
-Content loads live from the [AoPS Wiki](https://artofproblemsolving.com/wiki), [Wikipedia](https://en.wikipedia.org) (CC BY-SA), [ProofWiki](https://proofwiki.org) (CC BY-SA) and the [OEIS](https://oeis.org) (CC BY-SA). Every card links back to its source. Contest problems © MAA and their respective owners. MathScroll is for personal study and isn't affiliated with any of them.
+Problems: [NuminaMath-1.5](https://huggingface.co/datasets/project-numina/NuminaMath-1.5) (AMC/AIME problems with [AoPS Wiki](https://artofproblemsolving.com/wiki) solutions, [AoPS](https://artofproblemsolving.com/community) forum and olympiad problems; some forum solutions were written up with AI help). Theorems: [ProofWiki](https://proofwiki.org) (CC BY-SA) via [NaturalProofs](https://huggingface.co/datasets/wellecks/naturalproofs-gen). Sequences: the [OEIS](https://oeis.org) (CC BY-SA) via [christopher/oeis](https://huggingface.co/datasets/christopher/oeis). Articles: [Wikipedia](https://en.wikipedia.org) (CC BY-SA), live. Contest problems © MAA and their respective owners. MathScroll is for personal study and isn't affiliated with any of them.

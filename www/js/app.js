@@ -1,4 +1,4 @@
-import { SOURCES, CONTEST_FAMILIES, contestPoolSize, escapeHTML } from './sources.js';
+import { SOURCES, PROBLEM_TOPICS, escapeHTML } from './sources.js';
 import { renderContent } from './render.js';
 
 // ------------------------------------------------------------------ storage
@@ -12,14 +12,15 @@ const store = {
 };
 
 const DEFAULT_SETTINGS = {
-  sources: { contest: true, wikipedia: true, proofwiki: true, oeis: true, aopswiki: true },
-  weights: { contest: 45, wikipedia: 22, proofwiki: 13, oeis: 10, aopswiki: 10 },
-  families: ['amc8', 'amc10', 'amc12', 'aime', 'olympiad'],
-  difficulty: 'any',
+  sources: { contest: true, olympiad: true, aops: true, proofwiki: true, oeis: true, wikipedia: true },
+  weights: { contest: 24, olympiad: 16, aops: 14, proofwiki: 18, oeis: 12, wikipedia: 16 },
+  topics: [...PROBLEM_TOPICS],
 };
 
+// Settings from the first version of the app used different source names; start fresh if so.
+const savedSettings = store.get('settings', {});
 const state = {
-  settings: { ...DEFAULT_SETTINGS, ...store.get('settings', {}) },
+  settings: savedSettings.v === 2 ? { ...DEFAULT_SETTINGS, ...savedSettings } : { ...DEFAULT_SETTINGS, v: 2 },
   saved: store.get('saved', []),
   seen: new Set(store.get('seen', [])),
   stats: { answered: 0, correct: 0, streak: 0, best: 0, ...store.get('stats', {}) },
@@ -31,6 +32,8 @@ const state = {
 };
 state.settings.sources = { ...DEFAULT_SETTINGS.sources, ...state.settings.sources };
 state.settings.weights = { ...DEFAULT_SETTINGS.weights, ...state.settings.weights };
+state.settings.v = 2;
+if (!Array.isArray(state.settings.topics) || !state.settings.topics.length) state.settings.topics = [...PROBLEM_TOPICS];
 
 const saveSettings = () => store.set('settings', state.settings);
 const saveStats = () => store.set('stats', state.stats);
@@ -66,11 +69,12 @@ function toast(msg) {
 // ------------------------------------------------------------------ tabs
 const TABS = [
   { id: 'mix', label: 'For you' },
-  { id: 'contest', label: 'Contests' },
-  { id: 'wikipedia', label: 'Concepts' },
+  { id: 'contest', label: 'AMC/AIME' },
+  { id: 'aops', label: 'AoPS' },
+  { id: 'olympiad', label: 'Olympiad' },
   { id: 'proofwiki', label: 'Proofs' },
   { id: 'oeis', label: 'Sequences' },
-  { id: 'aopswiki', label: 'AoPS Wiki' },
+  { id: 'wikipedia', label: 'Concepts' },
 ];
 
 function renderTabs() {
@@ -184,19 +188,19 @@ function showFeedError(code) {
 
 // ------------------------------------------------------------------ cards
 const SOURCE_META = {
-  contest: { tag: 'Problem', cls: 's-contest' },
-  wikipedia: { tag: 'Concept', cls: 's-wiki' },
-  proofwiki: { tag: 'Theorem', cls: 's-proof' },
-  oeis: { tag: 'Sequence', cls: 's-oeis' },
-  aopswiki: { tag: 'AoPS Wiki', cls: 's-aops' },
+  contest: { tag: 'Problem', cls: 's-contest', from: 'AoPS Wiki' },
+  aops: { tag: 'Problem', cls: 's-aops', from: 'AoPS forum' },
+  olympiad: { tag: 'Problem', cls: 's-olympiad', from: 'Olympiad' },
+  wikipedia: { tag: 'Concept', cls: 's-wiki', from: 'Wikipedia' },
+  proofwiki: { tag: 'Theorem', cls: 's-proof', from: 'ProofWiki' },
+  oeis: { tag: 'Sequence', cls: 's-oeis', from: 'OEIS' },
 };
+const isProblem = (d) => ['contest', 'aops', 'olympiad'].includes(d.source);
 
 function buildCard(data, { standalone = false } = {}) {
-  const meta = SOURCE_META[data.source];
+  const meta = SOURCE_META[data.source] || SOURCE_META.wikipedia;
   const isSaved = state.saved.some((s) => s.id === data.id);
-  const where = data.source === 'contest'
-    ? `<span class="where">#${data.number} <span class="of">of ${data.of}</span></span>`
-    : `<span class="where">${escapeHTML(SOURCES[data.source].blurb.replace(/^.* via /, ''))}</span>`;
+  const where = `<span class="where">${escapeHTML(meta.from)}</span>`;
   const el = h(`<section class="card ${meta.cls}" data-id="${escapeHTML(data.id)}">
     <div class="card-inner">
       <div class="meta"><span class="pill">${meta.tag}</span>${where}</div>
@@ -225,7 +229,7 @@ function buildCard(data, { standalone = false } = {}) {
     content.appendChild(terms);
     content.appendChild(h('<p class="hint">What comes next — and why?</p>'));
   }
-  if (data.source === 'contest') content.appendChild(answerBox(data, el));
+  if (isProblem(data)) content.appendChild(answerBox(data, el));
 
   $('.save', el).addEventListener('click', (e) => toggleSave(data, e.currentTarget));
   $('.sol', el)?.addEventListener('click', () => openSolution(data));
@@ -242,8 +246,17 @@ function buildCard(data, { standalone = false } = {}) {
 
 function answerBox(data, cardEl) {
   if (!data.answer) {
-    const proof = data.of <= 6;
-    return h(`<p class="hint">${proof ? 'Proof-based — work it out, then tap <b>Solution</b>.' : 'Work it out, then tap <b>Solution</b>.'}</p>`);
+    return h(`<p class="hint">${data.isProof ? 'Proof problem — work it out, then tap <b>Solution</b>.' : 'Work it out, then tap <b>Solution</b>.'}</p>`);
+  }
+  if (data.answer.type === 'reveal') {
+    const box = h('<div class="answer"><button class="btn ghost reveal">Show answer</button></div>');
+    box.querySelector('.reveal').addEventListener('click', (e) => {
+      const ans = h('<div class="feedback revealed">Answer: </div>');
+      ans.appendChild(renderContent(`<span>$${escapeHTML(data.answer.value)}$</span>`, { base: 'text', dollar: true }));
+      e.currentTarget.replaceWith(ans);
+      requestAnimationFrame(() => cardEl._checkOverflow?.());
+    });
+    return box;
   }
   const box = h('<div class="answer"></div>');
   const finish = (ok, chosen) => {
@@ -278,12 +291,12 @@ function answerBox(data, cardEl) {
     }
     box.appendChild(row);
   } else {
-    const form = h(`<form class="numeric"><input inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="000–999" aria-label="Your answer" autocomplete="off"><button class="btn" type="submit">Check</button></form>`);
+    const form = h(`<form class="numeric"><input inputmode="numeric" maxlength="7" placeholder="Your answer" aria-label="Your answer" autocomplete="off"><button class="btn" type="submit">Check</button></form>`);
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const input = form.querySelector('input');
       const v = input.value.trim();
-      if (!/^\d{1,3}$/.test(v)) { input.classList.add('shake'); setTimeout(() => input.classList.remove('shake'), 400); return; }
+      if (!/^-?\d{1,6}$/.test(v)) { input.classList.add('shake'); setTimeout(() => input.classList.remove('shake'), 400); return; }
       input.blur();
       input.disabled = true; form.querySelector('button').disabled = true;
       const ok = String(parseInt(v, 10)) === data.answer.value;
@@ -345,7 +358,7 @@ function toggleSave(data, btn) {
 }
 
 async function share(data) {
-  const title = data.source === 'contest' ? `${data.heading} Problem ${data.number}` : data.heading;
+  const title = data.heading;
   try {
     if (navigator.share) { await navigator.share({ title, text: `${title} — via MathScroll`, url: data.url }); return; }
   } catch (e) { if (e.name === 'AbortError') return; }
@@ -419,10 +432,9 @@ function openSolution(data) {
   const body = document.createElement('div');
   body.className = 'content solution';
   body.appendChild(renderContent(data.solutionHtml, { base: data.base, dollar: data.dollarMath }));
-  const foot = h(`<p class="credit">From <a href="${escapeHTML(data.url)}" target="_blank" rel="noopener">${escapeHTML(SOURCES[data.source].blurb.replace(/^.* via /, ''))}</a>. Community-written; licence on source page.</p>`);
+  const foot = h(`<p class="credit">${escapeHTML(data.solutionNote || '')} <a href="${escapeHTML(data.url)}" target="_blank" rel="noopener">Source</a></p>`);
   body.appendChild(foot);
-  const title = data.source === 'contest' ? `${data.heading} · #${data.number}` : data.heading;
-  openSheet(`${data.solutionLabel} — ${title}`, body);
+  openSheet(`${data.solutionLabel} — ${data.heading}`, body);
 }
 
 // ------------------------------------------------------------------ saved
@@ -440,8 +452,8 @@ function openSaved() {
   } else {
     const list = h('<ul class="saved-list"></ul>');
     for (const item of state.saved) {
-      const meta = SOURCE_META[item.source];
-      const label = item.source === 'contest' ? `${item.heading} · #${item.number}` : item.heading;
+      const meta = SOURCE_META[item.source] || SOURCE_META.wikipedia;
+      const label = item.heading;
       const li = h(`<li class="${meta.cls}"><button class="saved-item"><span class="pill">${meta.tag}</span><span class="t">${escapeHTML(label)}</span></button></li>`);
       li.querySelector('button').addEventListener('click', () => {
         const card = buildCard(item, { standalone: true });
@@ -473,34 +485,19 @@ function openSettings() {
   }
   body.appendChild(srcList);
 
-  body.appendChild(h('<h3>Contests</h3>'));
-  const fam = h('<div class="group"></div>');
-  const pool = h('<p class="small pool"></p>');
-  const updatePool = () => { pool.textContent = `${contestPoolSize(st.families).toLocaleString()} contest problems in rotation`; };
-  for (const f of CONTEST_FAMILIES) {
-    const row = h(`<label class="row"><span><b>${f.label}</b></span><input type="checkbox" class="switch" ${st.families.includes(f.id) ? 'checked' : ''}></label>`);
+  body.appendChild(h('<h3>Problem topics</h3>'));
+  const topicList = h('<div class="group"></div>');
+  for (const t of PROBLEM_TOPICS) {
+    const row = h(`<label class="row"><span><b>${t}</b>${t === 'Combinatorics' ? '<small>Includes graph theory</small>' : ''}</span><input type="checkbox" class="switch" ${st.topics.includes(t) ? 'checked' : ''}></label>`);
     row.querySelector('input').addEventListener('change', (e) => {
-      st.families = e.target.checked ? [...new Set([...st.families, f.id])] : st.families.filter((x) => x !== f.id);
-      saveSettings(); updatePool(); changed = true;
+      st.topics = e.target.checked ? [...new Set([...st.topics, t])] : st.topics.filter((x) => x !== t);
+      if (!st.topics.length) st.topics = [...PROBLEM_TOPICS];
+      saveSettings(); changed = true;
     });
-    fam.appendChild(row);
+    topicList.appendChild(row);
   }
-  body.appendChild(fam);
-  updatePool();
-  body.appendChild(pool);
-
-  body.appendChild(h('<h3>Difficulty</h3>'));
-  const seg = h('<div class="segmented" role="radiogroup"></div>');
-  for (const d of ['any', 'easy', 'medium', 'hard']) {
-    const b = h(`<button role="radio" aria-checked="${st.difficulty === d}">${d[0].toUpperCase() + d.slice(1)}</button>`);
-    b.addEventListener('click', () => {
-      st.difficulty = d; saveSettings(); changed = true;
-      seg.querySelectorAll('button').forEach((x) => x.setAttribute('aria-checked', x === b));
-    });
-    seg.appendChild(b);
-  }
-  body.appendChild(seg);
-  body.appendChild(h('<p class="small">Based on where the problem sits in its contest — early problems are easier.</p>'));
+  body.appendChild(topicList);
+  body.appendChild(h('<p class="small">Applies to AMC/AIME, AoPS and olympiad problems.</p>'));
 
   body.appendChild(h('<h3>Data</h3>'));
   const reset = h('<button class="btn ghost">Reset stats & history</button>');
@@ -511,11 +508,13 @@ function openSettings() {
   });
   body.appendChild(reset);
 
-  body.appendChild(h(`<p class="small credits">Content comes live from the
-    <a href="https://artofproblemsolving.com/wiki" target="_blank" rel="noopener">AoPS Wiki</a>,
-    <a href="https://en.wikipedia.org" target="_blank" rel="noopener">Wikipedia</a> (CC BY-SA),
-    <a href="https://proofwiki.org" target="_blank" rel="noopener">ProofWiki</a> (CC BY-SA) and the
-    <a href="https://oeis.org" target="_blank" rel="noopener">OEIS</a> (CC BY-SA). Contest problems © MAA / their respective owners.</p>`));
+  body.appendChild(h(`<p class="small credits">Problems come from the
+    <a href="https://huggingface.co/datasets/project-numina/NuminaMath-1.5" target="_blank" rel="noopener">NuminaMath</a> dataset (AMC/AIME with AoPS Wiki solutions, AoPS forum and olympiad problems),
+    theorems from <a href="https://proofwiki.org" target="_blank" rel="noopener">ProofWiki</a> via
+    <a href="https://huggingface.co/datasets/wellecks/naturalproofs-gen" target="_blank" rel="noopener">NaturalProofs</a>,
+    sequences from the <a href="https://oeis.org" target="_blank" rel="noopener">OEIS</a>, and articles live from
+    <a href="https://en.wikipedia.org" target="_blank" rel="noopener">Wikipedia</a>. Wiki content is CC BY-SA.
+    Contest problems © MAA and their respective owners.</p>`));
 
   openSheet('Settings', body, '', () => {
     if (!changed) return;

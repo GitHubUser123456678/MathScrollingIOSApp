@@ -264,3 +264,16 @@ svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width:
 .content .choice-line { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: .3em 0; }
 .content .choice-item { white-space: nowrap; }
 .card.standalone::before { display: none; }
+
+/* v2 sources */
+.s-olympiad { --accent: #7dd3fc; }
+.content .diagram-note { font-family: var(--sans); font-size: 14px; color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; }
+.content .diagram-note b { color: var(--accent); }
+.content table.eqn { display: block; overflow-x: auto; border: 0; margin: .4em 0 1em; font-size: 1em; }
+.content table.eqn td { border: 0; padding: 3px 4px; vertical-align: middle; white-space: nowrap; }
+.content table.eqn .eqn-l { text-align: right; }
+.content table.eqn .eqn-c { font-family: var(--sans); font-size: 12.5px; color: var(--muted); white-space: normal; min-width: 120px; padding-left: 12px; }
+.content .pw-display { overflow-x: auto; margin: .3em 0 .8em 1em; scrollbar-width: none; }
+.content .qed { text-align: right; color: var(--muted); }
+.feedback.revealed { color: var(--text); font-size: 17px; }
+.reveal { margin-top: 2px; }

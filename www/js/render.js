@@ -52,6 +52,33 @@ const MACROS = {
   '\\geqslant': '\\geq',
   '\\overarc': '\\overset{\\frown}{#1}',
   '\\arc': '\\overset{\\frown}{#1}',
+  '\\order': '\\left|#1\\right|',
+  '\\index': '\\left[#1:#2\\right]',
+  '\\gen': '\\left\\langle#1\\right\\rangle',
+  '\\family': '\\left\\langle#1\\right\\rangle',
+  '\\struct': '\\left(#1\\right)',
+  '\\powerset': '\\mathcal P\\left(#1\\right)',
+  '\\relcomp': '\\complement_{#1}\\left(#2\\right)',
+  '\\Ker': '\\operatorname{Ker}',
+  '\\eval': '\\left.#1\\right|',
+  '\\valueat': '\\left.#1\\right|_{#2}',
+  '\\intlimits': '\\left[#1\\right]_{#2}^{#3}',
+  '\\nequiv': '\\not\\equiv',
+  '\\Mod': '\\pmod{#1}',
+  '\\Rr': '\\mathbb R',
+  '\\conjugate': '\\overline{#1}',
+  '\\sgn': '\\operatorname{sgn}',
+  '\\adj': '\\operatorname{adj}',
+  '\\Tr': '\\operatorname{Tr}',
+  '\\rank': '\\operatorname{rank}',
+  '\\Aut': '\\operatorname{Aut}',
+  '\\Inn': '\\operatorname{Inn}',
+  '\\Gal': '\\operatorname{Gal}',
+  '\\Char': '\\operatorname{Char}',
+  '\\diam': '\\operatorname{diam}',
+  '\\Cl': '\\operatorname{Cl}',
+  '\\Int': '\\operatorname{Int}',
+  '\\Bd': '\\partial',
 };
 
 function tex(src, display) {
@@ -102,7 +129,7 @@ function sanitize(root, base) {
       const cls = child.getAttribute('class') || '';
       for (const a of [...child.attributes]) child.removeAttribute(a.name);
       for (const [k, v] of Object.entries(keep)) if (v != null) child.setAttribute(k, v);
-      const keepCls = cls.split(/\s+/).filter((c) => /^(asy|tex-img)$/.test(c));
+      const keepCls = cls.split(/\s+/).filter((c) => /^(asy|tex-img|eqn|eqn-l|eqn-r|eqn-c|diagram-note|qed|pw-display|oeis-name|hint|plain)$/.test(c));
       if (keepCls.length) child.setAttribute('class', keepCls.join(' '));
       if (tag === 'A') {
         const href = keep.href || '';
@@ -194,25 +221,34 @@ function wikiMath(root) {
   }
 }
 
-// ProofWiki and others write raw $...$ / $$...$$ in the text; typeset those text runs.
+// Text with raw $...$, $$...$$, \\(...\\) or \\[...\\] maths (datasets, ProofWiki): typeset those runs.
 function dollarMath(root) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const nodes = [];
   while (walker.nextNode()) nodes.push(walker.currentNode);
-  // Join adjacent text so math split across nodes (rare) is still handled within a node.
+  const re = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$((?:\\\$|[^$])+?)\$|(\\begin\{(align\*?|equation\*?|gather\*?|eqnarray\*?|multline\*?)\}[\s\S]+?\\end\{\6\})/g;
   for (const node of nodes) {
     const text = node.nodeValue;
-    if (!text.includes('$')) continue;
+    if (!/[$\\]/.test(text)) continue;
     if (node.parentElement?.closest('.katex, code, pre')) continue;
-    const re = /\$\$([\s\S]+?)\$\$|\$((?:\\\$|[^$])+?)\$/g;
+    re.lastIndex = 0;
     let last = 0; let m; const frag = document.createDocumentFragment(); let changed = false;
     while ((m = re.exec(text))) {
       changed = true;
       frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-      const display = m[1] != null;
-      const el = document.createElement(display ? 'div' : 'span');
-      el.className = display ? 'tex-block' : 'tex';
-      el.innerHTML = texSoft(display ? m[1] : m[2], display);
+      const display = m[1] != null || m[2] != null || m[5] != null;
+      const src = (m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[5]).replace(/\\begin\{eqnarray\*?\}/, '\\begin{aligned}').replace(/\\end\{eqnarray\*?\}/, '\\end{aligned}');
+      const parts = display ? [src] : splitQuads(src);
+      let el;
+      if (parts.length > 1) {
+        el = document.createElement('span');
+        el.className = 'tex choice-line';
+        el.innerHTML = parts.map((p) => `<span class="choice-item">${texSoft(p, false)}</span>`).join('');
+      } else {
+        el = document.createElement(display ? 'div' : 'span');
+        el.className = display ? 'tex-block' : 'tex';
+        el.innerHTML = texSoft(src, display);
+      }
       frag.appendChild(el);
       last = re.lastIndex;
     }
