@@ -26,11 +26,15 @@ Why the mirrors? AoPS puts every automated request through a bot check, and Proo
 - **Diagrams and pictures**: Asymptote diagrams in AMC/AIME and MATH problems are drawn in the app (a built-in Asymptote interpreter), olympiad and forum problems show their images, Wikipedia cards keep their main picture, and tapping any picture opens it full screen.
 - **Hints** (the first step of the solution) and full solutions/proofs that slide up.
 - **Focus problems**: every few problems the feed pauses for 10 seconds (or until you answer) so you really try it, with a few skips a day. Hints, answers, solutions and source links unlock after the think time, and flicking past several problems in a row triggers a focus problem. Think time is tracked in your profile. All adjustable in Settings.
+- **XP & levels**: every solve earns XP (more for harder problems, ×1.5–×2.5 combos for answer streaks), plus a daily sign-in bonus; level-ups with titles from Novice to Legend.
+- **Daily quests**: three a day (the same for everyone); finishing all three gives bonus XP and a streak freeze that protects your day streak.
+- **Progress hub** (the level ring, top left): level, quests, streaks, daily challenge results and leaderboards.
 - **Daily challenge**: the same AMC/AIME problem for everyone each day, with a daily streak and a share-your-result button.
 - **Sprint**: 10 answerable AMC/AIME problems against the clock, with a personal best.
 - **Guess the next term** on every OEIS sequence.
 - **Post** your own problems, facts and questions with a live maths preview. Sharing makes a link that contains the whole post, so anyone can open it in MathScroll — no account or server needed.
 - **Search** across problems, ProofWiki, the OEIS and Wikipedia.
+- **Account-only features** (once accounts are set up): the daily challenge, weekly/all-time/sprint leaderboards, ranked sprints, and saving more than 20 cards. Before setup nothing is locked.
 - **Accounts & Community** (after the 5-minute setup in [SETUP-ACCOUNTS.md](SETUP-ACCOUNTS.md)): sign up with a username, post publicly, like, comment, report, and share links to posts.
 - **Filters**: difficulty range or "match my level", answer type (A–E / number / proof), only checkable problems, topics, Wikipedia topics, sources, classic sequences, skip seen.
 - **Skill rating**: an Elo-style rating that rises faster for harder problems, with a history graph and accuracy by difficulty and by topic.

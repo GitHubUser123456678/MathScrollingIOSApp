@@ -246,3 +246,42 @@ export async function report({ postId = null, commentId = null, reason = '' }) {
   if (!currentUser()) throw new Error('Sign in to report.');
   await request('/rest/v1/reports', { method: 'POST', body: { post_id: postId, comment_id: commentId, reason: reason.slice(0, 300) } });
 }
+
+// ------------------------------------------------------------------ XP & leaderboards
+// Monday of this week in UTC, matching the server's date_trunc('week', now()).
+export function weekStart() {
+  const d = new Date(); const day = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - day);
+  return d.toISOString().slice(0, 10);
+}
+export async function addXp(amount) {
+  if (!currentUser() || amount <= 0) return null;
+  return request('/rest/v1/rpc/add_xp', { method: 'POST', body: { amount: Math.round(amount) } });
+}
+export async function myXp() {
+  const u = currentUser(); if (!u) return null;
+  const rows = await request(`/rest/v1/xp?user_id=eq.${u.id}&select=*`);
+  return rows?.[0] || null;
+}
+export async function leaderboard(kind = 'week', limit = 50) {
+  if (kind === 'week') return request(`/rest/v1/xp?select=user_id,week_xp,level,profiles(username)&week_start=eq.${weekStart()}&week_xp=gt.0&order=week_xp.desc&limit=${limit}`, { auth: !!session });
+  return request(`/rest/v1/xp?select=user_id,total,level,profiles(username)&total=gt.0&order=total.desc&limit=${limit}`, { auth: !!session });
+}
+export async function submitDaily(day, solved) {
+  if (!currentUser()) return;
+  await request('/rest/v1/daily_results', { method: 'POST', body: { day, solved }, prefer: 'resolution=ignore-duplicates,return=minimal' });
+}
+export async function dailyStats(day) {
+  const rows = await request(`/rest/v1/daily_results?day=eq.${day}&select=solved&limit=5000`, { auth: !!session });
+  return { total: rows.length, solved: rows.filter((r) => r.solved).length };
+}
+export async function submitSprint(score, ms) {
+  if (!currentUser()) return;
+  await request('/rest/v1/sprint_scores', { method: 'POST', body: { score, ms: Math.round(ms) }, prefer: 'return=minimal' });
+}
+export async function sprintLeaderboard(sinceIso, limit = 30) {
+  const rows = await request(`/rest/v1/sprint_scores?select=user_id,score,ms,created_at,profiles(username)&created_at=gte.${sinceIso}&order=score.desc,ms.asc&limit=${limit * 4}`, { auth: !!session });
+  const best = new Map();
+  for (const r of rows) if (!best.has(r.user_id)) best.set(r.user_id, r); // each person's best run
+  return [...best.values()].slice(0, limit);
+}

@@ -10,6 +10,8 @@ The app uses [Supabase](https://supabase.com), which has a free tier that's plen
 2. Click **New project**. Pick any name (e.g. `mathscroll`), set a database password (save it somewhere), choose the region closest to you, and click **Create new project**. Wait about a minute.
 
 ## 2. Create the tables
+(If you ran an older version of `schema.sql`, just run the new one again; it's safe to re-run and adds XP, leaderboard, daily-challenge and sprint tables.)
+
 1. In the left sidebar, open **SQL Editor** → **New query**.
 2. Open `supabase/schema.sql` from this repo, copy **everything**, paste it in, and click **Run**. You should see "Success. No rows returned".
 

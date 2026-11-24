@@ -139,3 +139,73 @@ drop policy if exists "insert own data" on public.user_data;
 create policy "insert own data" on public.user_data for insert with check (auth.uid() = user_id);
 drop policy if exists "update own data" on public.user_data;
 create policy "update own data" on public.user_data for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------- XP, leaderboards, daily challenge, sprint
+-- XP can only be added through add_xp(), which caps each call and each day.
+create table if not exists public.xp (
+  user_id uuid primary key references public.profiles (id) on delete cascade,
+  total integer not null default 0,
+  week_start date not null default (date_trunc('week', now())::date),
+  week_xp integer not null default 0,
+  day date not null default current_date,
+  day_xp integer not null default 0,
+  level integer not null default 1,
+  updated_at timestamptz not null default now()
+);
+create index if not exists xp_week on public.xp (week_start, week_xp desc);
+create index if not exists xp_total on public.xp (total desc);
+alter table public.xp enable row level security;
+drop policy if exists "xp readable" on public.xp;
+create policy "xp readable" on public.xp for select using (true);
+
+create or replace function public.level_for(x integer) returns integer
+language sql immutable as $$ select greatest(1, floor((1 + sqrt(1 + 0.16 * greatest(x, 0))) / 2))::integer $$;
+
+create or replace function public.add_xp(amount integer) returns public.xp
+language plpgsql security definer set search_path = public as $$
+declare
+  r public.xp;
+  wk date := date_trunc('week', now())::date;
+  a integer := least(greatest(coalesce(amount, 0), 0), 400);
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  insert into public.xp (user_id) values (auth.uid()) on conflict (user_id) do nothing;
+  select * into r from public.xp where user_id = auth.uid() for update;
+  if r.week_start <> wk then r.week_start := wk; r.week_xp := 0; end if;
+  if r.day <> current_date then r.day := current_date; r.day_xp := 0; end if;
+  a := least(a, greatest(0, 4000 - r.day_xp)); -- at most 4,000 XP a day
+  update public.xp set total = r.total + a, week_start = r.week_start, week_xp = r.week_xp + a,
+    day = r.day, day_xp = r.day_xp + a, level = public.level_for(r.total + a), updated_at = now()
+  where user_id = auth.uid() returning * into r;
+  return r;
+end;
+$$;
+revoke all on function public.add_xp(integer) from public, anon;
+grant execute on function public.add_xp(integer) to authenticated;
+
+create table if not exists public.daily_results (
+  user_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  day date not null,
+  solved boolean not null,
+  created_at timestamptz not null default now(),
+  primary key (user_id, day)
+);
+alter table public.daily_results enable row level security;
+drop policy if exists "daily readable" on public.daily_results;
+create policy "daily readable" on public.daily_results for select using (true);
+drop policy if exists "submit own daily" on public.daily_results;
+create policy "submit own daily" on public.daily_results for insert with check (auth.uid() = user_id and day between current_date - 1 and current_date + 1);
+
+create table if not exists public.sprint_scores (
+  id bigint generated always as identity primary key,
+  user_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  score integer not null check (score between 0 and 10),
+  ms integer not null check (ms between 5000 and 7200000),
+  created_at timestamptz not null default now()
+);
+create index if not exists sprint_best on public.sprint_scores (score desc, ms asc);
+alter table public.sprint_scores enable row level security;
+drop policy if exists "sprints readable" on public.sprint_scores;
+create policy "sprints readable" on public.sprint_scores for select using (true);
+drop policy if exists "submit own sprint" on public.sprint_scores;
+create policy "submit own sprint" on public.sprint_scores for insert with check (auth.uid() = user_id);
