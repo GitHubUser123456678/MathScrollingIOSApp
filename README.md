@@ -34,7 +34,8 @@ Why the mirrors? AoPS puts every automated request through a bot check, and Proo
 - **Leagues**: Bronze → Silver → Gold → Platinum → Diamond → Master by weekly XP.
 - **🎓 Learn**: **Foundations** courses (7 MATH subjects, levels 1–5) and **Olympiad** courses (number theory, combinatorics, algebra, geometry, mixed; Omni-MATH, warm-up to IMO). Each unit has:
   - a 📚 **lecture** written for that unit: a hook, three explained ideas, a worked example revealed step by step, a quick check question with an explanation, a Wikipedia "go deeper" page, a real competition problem, and flip-card recap (the 📖 guidebook keeps the notes);
-  - four lessons with hearts and **confidence bets** (🤷 guess / 🙂 think so / 🔒 sure: sure pays bonus XP but costs two hearts if wrong; your calibration is shown at the end);
+  - **three teaching lessons**, one per key idea (180 hand-written lessons across the 12 courses, source in `tools/lessons_src.py`): a short explanation, a worked example revealed step by step, two guided checks (try again until right, no hearts lost, with an explanation), then two real problems; plus a **practice** lesson of five problems;
+  - hearts and **confidence bets** on the problems (🤷 guess / 🙂 think so / 🔒 sure: sure pays bonus XP but costs two hearts if wrong; your calibration is shown at the end);
   - a 🎁 chest, a 🏆 unit test, and a 👹 **boss problem** one level harder, with a hint ladder that lowers the reward;
   - a 🧠 **memory meter** that fades like real memory (one-week half-life, doubling with each review) and asks you to refresh;
   - a 📖 guidebook and a 👑 legendary no-mistakes challenge, plus a 🔁 mistakes review.

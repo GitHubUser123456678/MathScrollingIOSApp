@@ -1368,3 +1368,28 @@ body.on-fire .card::before { background: radial-gradient(120% 60% at 0% 100%, rg
 .nim-s.far { opacity: .35; }
 .blitz.sudden .gb-top { box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--no) 60%, transparent); }
 .nj-pow { font-weight: 800; }
+
+/* ================================================================ teaching lessons */
+.teach { display: grid; gap: 12px; padding: 6px 16px 24px; max-width: 620px; margin: 0 auto; }
+.t-kicker { color: var(--muted); font-weight: 800; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+.t-title { margin: 0; font-size: 26px; line-height: 1.2; color: var(--cc); }
+.t-body { font-family: var(--serif); font-size: 18px; line-height: 1.6; }
+.t-body p { margin: 0 0 12px; } .t-body b { color: var(--text); }
+.t-prob { font-family: var(--serif); font-size: 19px; line-height: 1.5; padding: 14px 16px; border-radius: 16px; background: var(--card-2); border: 1px solid var(--line); }
+.t-prob p, .t-stepbox p, .t-why p, .t-ans p, .t-recallbox p { margin: 0; }
+.t-steps { display: grid; gap: 8px; }
+.t-stepbox { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; border-left: 4px solid var(--cc); background: color-mix(in srgb, var(--cc) 10%, var(--card)); font-size: 17px; line-height: 1.5; animation: rise .25s both; }
+.t-stepbox > b { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--cc); color: #fff; font-size: 13px; }
+.t-ans { padding: 12px 14px; border-radius: 14px; background: color-mix(in srgb, #58cc02 14%, var(--card-2)); border: 1px solid color-mix(in srgb, #58cc02 40%, transparent); font-size: 18px; animation: rise .25s both; }
+.t-ans b { color: #58cc02; }
+.t-choices { display: grid; gap: 8px; }
+.t-choices .st-choice:disabled { opacity: .55; }
+.t-why { padding: 12px 14px; border-radius: 14px; font-size: 16px; line-height: 1.55; background: var(--card-2); animation: rise .25s both; }
+.t-why.ok b { color: #58cc02; } .t-why.no b { color: #ff4b4b; }
+.teach .btn { margin: 4px 0 0; }
+.t-recall { display: block; margin-top: 6px; font-size: 14px; }
+.t-recallbox { margin-top: 8px; padding: 10px 12px; border-radius: 12px; background: var(--card); font-size: 14.5px; line-height: 1.5; max-height: 30vh; overflow-y: auto; text-align: left; }
+.t-recallbox p { margin: 0 0 6px; }
+.node.teach.current, .node.teach.done { background: var(--cc); }
+.node.practice:not(.test) { border-radius: 50%; }
+.node-name { position: absolute; top: calc(100% + 4px); left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 11.5px; font-weight: 700; color: var(--muted); max-width: 150px; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
