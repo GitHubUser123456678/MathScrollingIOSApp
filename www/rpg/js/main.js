@@ -3,6 +3,7 @@ import { CLASSES, ABILITIES, PER_LEVEL, xpToNext, MAX_LEVEL, ITEMS, SHOP, MONSTE
 import { createWorld } from './world.js';
 import { startBattle } from './battle.js';
 import { createNet } from './net.js';
+import { cloudEnabled, currentUser } from '../../js/cloud.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
@@ -342,6 +343,14 @@ function travel(zone, fromSide, toStone = false) {
 // ------------------------------------------------------------------ title & character creation
 function titleScreen() {
   const ui = $('#ui');
+  // With accounts set up, Numeria needs a free MathScroll account (made in the main app).
+  if (cloudEnabled && !currentUser()) {
+    ui.appendChild(el(`<div class="title"><div class="title-inner"><div class="logo">∑ Numeria</div><p class="tag">A maths MMO · from AMC 8 to the AIME</p>
+      <p class="tag">Numeria needs a free MathScroll account, so your hero and progress are saved.</p>
+      <a class="btn big" href="../#signup">Create free account</a><a class="btn ghost" href="../#signin">I have an account</a>
+      <a class="link back" href="../">↩ Back to MathScroll</a></div></div>`));
+    return;
+  }
   const t = el(`<div class="title"><div class="title-inner"><div class="logo">∑ Numeria</div><p class="tag">A maths MMO · from AMC 8 to the AIME</p>
     ${P ? `<button class="btn big cont">Continue as ${P.name} <small>Lv ${P.level} ${CLASSES[P.cls].name}</small></button><button class="btn ghost new">New hero</button>` : '<button class="btn big new">Create your hero</button>'}
     <a class="link back" href="../">↩ Back to MathScroll</a></div></div>`);

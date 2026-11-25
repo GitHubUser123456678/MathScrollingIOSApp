@@ -1,8 +1,8 @@
 // Caches the app shell so MathScroll opens instantly and works offline (content still needs a connection).
-const VERSION = 'mathscroll-v19';
+const VERSION = 'mathscroll-v20';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'js/app.js', 'js/sources.js', 'js/render.js', 'js/cloud.js', 'js/config.js', 'js/asy.js', 'js/games.js', 'js/chess.js', 'js/learn.js', 'js/expr.js', 'js/games2.js', 'js/lectures.js', 'js/spark.js', 'rpg/', 'rpg/index.html', 'rpg/rpg.css', 'rpg/js/main.js', 'rpg/js/data.js', 'rpg/js/problems.js', 'rpg/js/world.js', 'rpg/js/battle.js', 'rpg/js/net.js',
+  'js/app.js', 'js/sources.js', 'js/render.js', 'js/cloud.js', 'js/config.js', 'js/asy.js', 'js/games.js', 'js/chess.js', 'js/learn.js', 'js/expr.js', 'js/games2.js', 'js/lectures.js', 'js/spark.js', 'js/campaign.js', 'rpg/', 'rpg/index.html', 'rpg/rpg.css', 'rpg/js/main.js', 'rpg/js/data.js', 'rpg/js/problems.js', 'rpg/js/world.js', 'rpg/js/battle.js', 'rpg/js/net.js',
   'vendor/katex/katex.min.js', 'vendor/katex/katex.min.css',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',
   "vendor/katex/fonts/KaTeX_AMS-Regular.woff2",

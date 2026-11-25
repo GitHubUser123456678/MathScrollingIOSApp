@@ -40,10 +40,11 @@ Why the mirrors? AoPS puts every automated request through a bot check, and Proo
   - a 📖 guidebook and a 👑 legendary no-mistakes challenge, plus a 🔁 mistakes review.
 - **Answers you can type**: besides whole numbers and multiple choice, problems with answers like 3/4, 2√3 or π/6 are checked by value. You can type `3/4`, `2sqrt(3)` or `pi/6`.
 - **12 mini-games** (🎮 Games tab), each a different kind of game, with first-play tutorials, particle effects and a daily **game of the day** (2× XP):
-  - **Action:** *Number Ninja* (swipe to slice numbers that fit the rule: primes, squares, multiples…), *Meteor Defense* (tap answers to laser falling meteors, in waves), *Math Blitz* (60 s of mixed speed maths with combo multipliers, fever mode and time freezes).
-  - **Puzzle:** Block Blast, 2048, Sudoku, Minesweeper.
-  - **Brain teasers:** 24, Code Breaker, Memory Match.
-  - **Strategy:** Chess Puzzles (Lichess, rated), Nim.
+  - **Campaigns:** every game has **12 levels** with 1–3 ⭐ each and a 👹 boss every fourth level (144 levels in all). A **star road** across all games pays ⚡ and XP and gives titles from *Rookie* to *Perfectionist*. Each game also keeps an **Endless** mode.
+  - **Action:** *Number Ninja* (slice numbers that fit the rule; ❄️ slow-mo, ⭐ double points and ❤️ power-ups, timed levels, rules that change), *Meteor Defense* (answer to fire; 🛡️ and ⚡ EMP capsules, and a 👾 Mothership boss with hit points), *Math Blitz* (topic levels and ☠️ sudden-death bosses).
+  - **Puzzle:** *Block Blast* (piece budgets, stone blocks and 💎 gems to collect), *2048* (3×3 to 5×5 boards, 🪨 rocks, target tiles, undo), *Sudoku* (4×4 and 6×6 minis up to expert 9×9, always a single solution, ✏️ notes, hearts, hints), *Minesweeper* (bigger fields, long-press flags, tap-a-number to open around it, 🛡️ shields).
+  - **Brain teasers:** *24* (targets from 10 to 72 and moving targets), *Code Breaker* (3–6 digits, repeated digits, a ✗/✓ digit tracker), *Memory Match* (three difficulty pools, up to 12 pairs, 👀 peek, timed bosses).
+  - **Strategy:** *Chess Puzzles* (levels from 600 to 1800, with lives), *Nim* (classic, misère and take-at-most-k; a perfect-play computer and best-of-3 bosses).
   - Games cost ⚡ (earned by solving problems), except Math Blitz, 24 and Memory Match.
 - **Feed**: odd or broken cards are skipped (problems that refer to a missing figure, garbled or near-empty text, stub articles) while every source stays in. Every 8 cards the For you feed drops in a ⚡ lightning round, a Quick 24, a "continue your course" card or the game of the day.
 - **⚡ Charges**: every correct answer — feed, Learn or in-game — earns 1 ⚡. When you're out, the game hands you a problem to solve. Set how hard those problems are in Games → change (Easy, Medium, Hard, Expert).
@@ -56,7 +57,7 @@ Why the mirrors? AoPS puts every automated request through a bot check, and Proo
 - **Guess the next term** on every OEIS sequence.
 - **Post** your own problems, facts and questions with a live maths preview. Sharing makes a link that contains the whole post, so anyone can open it in MathScroll — no account or server needed.
 - **Search** across problems, ProofWiki, the OEIS and Wikipedia.
-- **Account-only features** (once accounts are set up): the daily challenge, weekly/all-time/sprint leaderboards, ranked sprints, and saving more than 20 cards. Before setup nothing is locked.
+- **Free account required** (once accounts are set up — see [SETUP-ACCOUNTS.md](SETUP-ACCOUNTS.md)): guests get 10 free feed cards, then a sign-up screen. The feed, Learn, Games, Numeria, posting, the daily challenge, leaderboards and sprints all need a free account. Until the Supabase URL and key are pasted into `www/js/config.js`, nothing is locked.
 - **Accounts & Community** (after the 5-minute setup in [SETUP-ACCOUNTS.md](SETUP-ACCOUNTS.md)): sign up with a username, post publicly, like, comment, report, and share links to posts.
 - **Filters**: difficulty range or "match my level", answer type (A–E / number / proof), only checkable problems, topics, Wikipedia topics, sources, classic sequences, skip seen.
 - **Skill rating**: an Elo-style rating that rises faster for harder problems, with a history graph and accuracy by difficulty and by topic.

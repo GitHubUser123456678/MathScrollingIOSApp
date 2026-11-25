@@ -6,6 +6,7 @@ const rnd = (n) => Math.floor(Math.random() * n);
 import { legal as chessLegal, make as chessMake, inCheck as chessInCheck, san as chessSan, fromFEN, moveFromUci, uciOf } from './chess.js';
 
 import { GAMES2, PAID2, play2, burst, popText, confetti } from './games2.js';
+import { STAGES, openLevels, stageResult, roadHtml, openRoad, gameStars } from './campaign.js';
 const BASE_GAMES = [
   { id: 'blockblast', name: 'Block Blast', icon: '🧱', blurb: 'Drop blocks, clear rows and columns, chain combos.', cost: '1⚡ per 3 pieces', cat: 'puzzle',
     how: ['Drag a piece onto the board.', 'Fill a whole row or column to clear it — several at once score big.', 'Every 3 pieces cost 1 ⚡. Stuck? Solve a problem for a second chance.'] },
@@ -24,17 +25,20 @@ const CATS = [['action', '🔥 Action'], ['puzzle', '🧩 Puzzle'], ['brain', '�
 
 // ------------------------------------------------------------------ hub
 export function openGames(ctx) {
+  ctx = withHelpers(ctx);
   const best = ctx.bests();
   const gotd = GAMES.find((g) => g.id === gameOfDay());
-  const tile = (g) => `<button class="gm-tile" data-g="${g.id}"><span class="gm-icon">${g.icon}</span><b>${g.name}</b><small>${best[g.id] != null && best[g.id] > 0 ? `Best ${ctx.bestLabel(g.id, best[g.id])}` : g.cost}</small></button>`;
+  const tile = (g) => { const st = gameStars(ctx, g.id); return `<button class="gm-tile" data-g="${g.id}"><span class="gm-icon">${g.icon}</span><b>${g.name}</b><small class="gm-st"><i style="width:${Math.round((st / 36) * 100)}%"></i></small><small>⭐ ${st}/36${best[g.id] != null && best[g.id] > 0 ? ` · Best ${ctx.bestLabel(g.id, best[g.id])}` : ''}</small></button>`; };
   const body = el(`<div class="games-hub">
     <div class="gm-top"><span class="g-charge-static">⚡ <b>${ctx.charges()}</b></span><span class="small">Problems for ⚡: <b>${ctx.gameLevelName()}</b> <button class="link g-level">change</button></span></div>
+    ${roadHtml(ctx)}
     <a class="gm-mmo" href="rpg/"><span class="gm-icon">⚔️</span><span><small>NEW · MATHS MMO</small><b>Numeria</b><em>Explore a world, battle with real AMC 8 → AIME problems, raid with friends.</em></span><span class="gm-go">Play ›</span></a>
     <button class="gm-feature" data-g="${gotd.id}"><span class="gm-icon">${gotd.icon}</span><span><small>GAME OF THE DAY · 2× XP</small><b>${gotd.name}</b><em>${gotd.blurb}</em></span></button>
     ${CATS.map(([c, label]) => `<h4 class="gm-cat">${label}</h4><div class="gm-grid">${GAMES.filter((g) => g.cat === c).map(tile).join('')}</div>`).join('')}
     <p class="small">Every problem you get right — in the feed, in Learn, or in a game — earns ⚡. Math Blitz, 24 and Memory Match are free, because they’re maths already.</p></div>`);
   body.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => startGame(b.dataset.g, ctx)));
   body.querySelector('.g-level').addEventListener('click', () => ctx.pickGameLevel(() => openGames(ctx)));
+  body.querySelector('.gm-road').addEventListener('click', () => openRoad(ctx, () => openGames(ctx)));
   ctx.openSheet('Games', body, 'tall');
 }
 // The first time you open a game, show how to play.
@@ -46,14 +50,39 @@ function howTo(ctx, g) {
   });
 }
 const seenHow = (id) => { try { return !!localStorage.getItem(`ms:howto:${id}`); } catch { return true; } };
-export async function startGame(id, ctx, ...args) {
+// Helpers every game and the campaign screens can use.
+function withHelpers(ctx) {
+  if (ctx._h) return ctx;
+  const c = { ...ctx, _h: true, confetti, gameMeta: (id) => GAMES.find((g) => g.id === id) };
+  c.openGames = () => openGames(c);
+  return c;
+}
+// No options: show the game's level map. { idx }: play a campaign level. { endless: true }: classic mode.
+export async function startGame(id, ctx, opt) {
+  ctx = withHelpers(ctx);
   const meta = GAMES.find((x) => x.id === id);
-  if (meta?.how && !seenHow(id) && !(await howTo(ctx, meta))) return;
-  if (GAMES2.some((g) => g.id === id)) {
-    if (PAID2.has(id) && !(await payOrSolve(ctx, `play ${GAMES2.find((g) => g.id === id).name}`))) return;
-    return play2(id, { ...ctx, startGame: (gid) => startGame(gid, ctx), openGames: () => openGames(ctx) });
+  if (opt === undefined && STAGES[id]) {
+    return openLevels(ctx, meta, {
+      play: (i) => startGame(id, ctx, { idx: i }),
+      endless: () => startGame(id, ctx, { endless: true }),
+      howTo: async () => { if (await howTo(ctx, meta)) startGame(id, ctx); },
+    });
   }
-  ({ blockblast: blockBlast, chess, g24: game24 })[id](ctx, ...args);
+  opt ||= { endless: true };
+  if (meta?.how && !seenHow(id) && !(await howTo(ctx, meta))) return;
+  const idx = opt.idx;
+  const stage = idx != null ? STAGES[id][idx] : null;
+  const o = {
+    ...opt, stage, p: stage?.p || {},
+    end: (body, res) => stageResult(ctx, body, { id, idx, ...res,
+      retry: () => startGame(id, ctx, { idx }), next: () => startGame(id, ctx, { idx: idx + 1 }), levels: () => startGame(id, ctx) }),
+  };
+  const paid = PAID2.has(id) || (stage && (id === 'blockblast' || id === 'chess'));
+  if (paid && !opt.run && !(await payOrSolve(ctx, `play ${meta.name}`))) return;
+  if (GAMES2.some((g) => g.id === id)) {
+    return play2(id, { ...ctx, startGame: (gid, oo) => startGame(gid, ctx, oo ?? { endless: true }) }, o);
+  }
+  ({ blockblast: blockBlast, chess, g24: game24 })[id](ctx, o);
 }
 
 // ------------------------------------------------------------------ 24
@@ -69,8 +98,8 @@ const fop = (a, b, op) => {
 };
 const fstr = (f) => (f.d === 1 ? String(f.n) : `${f.n}/${f.d}`);
 // Find one way to make 24 (returns the expression, or null).
-function solve24(cards) {
-  if (cards.length === 1) return cards[0].v.n === 24 && cards[0].v.d === 1 ? cards[0].e : null;
+function solve24(cards, T = 24) {
+  if (cards.length === 1) return cards[0].v.n === T && cards[0].v.d === 1 ? cards[0].e : null;
   for (let i = 0; i < cards.length; i++) {
     for (let j = 0; j < cards.length; j++) {
       if (i === j) continue;
@@ -79,23 +108,26 @@ function solve24(cards) {
         if ((op === '+' || op === '×') && j < i) continue;
         const v = fop(cards[i].v, cards[j].v, op);
         if (!v) continue;
-        const r = solve24([...rest, { v, e: `(${cards[i].e} ${op} ${cards[j].e})` }]);
+        const r = solve24([...rest, { v, e: `(${cards[i].e} ${op} ${cards[j].e})` }], T);
         if (r) return r;
       }
     }
   }
   return null;
 }
-export function new24() {
+const MIX_TARGETS = [10, 12, 15, 18, 20, 24, 28, 30, 36, 40, 48, 60];
+export function new24(target = 24, max = 9) {
   for (;;) {
-    const nums = Array.from({ length: 4 }, () => 1 + rnd(9));
-    const sol = solve24(nums.map((n) => ({ v: frac(n), e: String(n) })));
-    if (sol) return { nums, sol: sol.replace(/^\((.*)\)$/, '$1') };
+    const T = target === 'mix' ? MIX_TARGETS[rnd(MIX_TARGETS.length)] : target;
+    const nums = Array.from({ length: 4 }, () => 1 + rnd(max));
+    const sol = solve24(nums.map((n) => ({ v: frac(n), e: String(n) })), T);
+    if (sol) return { nums, T, sol: sol.replace(/^\((.*)\)$/, '$1') };
   }
 }
 // The 24 board, usable full-screen or inside a feed card.
-export function mount24(container, ctx, { onSolve, compact = false } = {}) {
-  let puzzle = new24();
+export function mount24(container, ctx, { onSolve, compact = false, target = 24, max = 9, onNew } = {}) {
+  const fresh = () => { const z = new24(target, max); onNew?.(z.T); return z; };
+  let puzzle = fresh();
   let cards; let picked = null; let op = null; let history = [];
   const root = el(`<div class="g24 ${compact ? 'compact' : ''}">
     <div class="g24-cards"></div>
@@ -128,27 +160,31 @@ export function mount24(container, ctx, { onSolve, compact = false } = {}) {
     ctx.sound('quest');
     render();
     if (cards.length === 1) {
-      if (v.n === 24 && v.d === 1) { msg('24! Nice.'); ctx.sound('correct'); root.classList.add('won'); { const b = root.getBoundingClientRect(); burst(b.left + b.width / 2, b.top + b.height / 3, { color: ['#4ade80', '#facc15', '#60a5fa'], n: 24 }); popText(b.left + b.width / 2, b.top + b.height / 3, '24!'); } setTimeout(() => { root.classList.remove('won'); onSolve?.(); }, 700); }
-      else { msg(`That makes ${fstr(v)}, not 24. Undo and try again.`); ctx.sound('wrong'); }
+      if (v.n === puzzle.T && v.d === 1) { msg(`${puzzle.T}! Nice.`); ctx.sound('correct'); root.classList.add('won'); { const b = root.getBoundingClientRect(); burst(b.left + b.width / 2, b.top + b.height / 3, { color: ['#4ade80', '#facc15', '#60a5fa'], n: 24 }); popText(b.left + b.width / 2, b.top + b.height / 3, `${puzzle.T}!`); } setTimeout(() => { root.classList.remove('won'); onSolve?.(); }, 700); }
+      else { msg(`That makes ${fstr(v)}, not ${puzzle.T}. Undo and try again.`); ctx.sound('wrong'); }
     }
   };
   root.querySelectorAll('.g24-op').forEach((b) => b.addEventListener('click', () => { if (picked === null) { msg('Pick a number first.'); return; } op = b.dataset.op; render(); }));
   root.querySelector('.undo').addEventListener('click', () => { if (history.length) { cards = history.pop(); picked = null; op = null; render(); } });
   root.querySelector('.reset').addEventListener('click', reset);
-  root.querySelector('.hint').addEventListener('click', () => { msg(`One way: ${puzzle.sol} = 24`); root.dataset.hinted = '1'; });
-  root.querySelector('.skip')?.addEventListener('click', () => { puzzle = new24(); root.dataset.hinted = ''; reset(); msg('New numbers.'); });
+  root.querySelector('.hint').addEventListener('click', () => { msg(`One way: ${puzzle.sol} = ${puzzle.T}`); root.dataset.hinted = '1'; });
+  root.querySelector('.skip')?.addEventListener('click', () => { puzzle = fresh(); root.dataset.hinted = ''; reset(); msg('New numbers.'); });
   reset();
   return {
-    next() { puzzle = new24(); root.dataset.hinted = ''; reset(); msg('Tap a number, an operation, then another number.'); },
+    next() { puzzle = fresh(); root.dataset.hinted = ''; reset(); msg('Tap a number, an operation, then another number.'); },
     hinted: () => root.dataset.hinted === '1',
   };
 }
-function game24(ctx) {
-  const TIME = 120;
+function game24(ctx, o = {}) {
+  const P = o.p || {};
+  const TIME = P.time || 120;
   let solved = 0; let left = TIME; let over = false;
-  const body = el(`<div class="g24-game"><div class="gb-top"><span class="gb-score">0 solved</span><span class="gb-target">Make <b>24</b></span><span class="gb-time">2:00</span></div><div class="g24-slot"></div></div>`);
+  const clock = (t) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+  const body = el(`<div class="g24-game"><div class="gb-top"><span class="gb-score">0 solved</span><span class="gb-target">Make <b>${P.target === 'mix' ? '?' : P.target || 24}</b></span><span class="gb-time">${clock(TIME)}</span></div>${o.stage ? `<div class="stage-bar"><b>Level ${o.idx + 1}</b> ${o.stage.starText}</div>` : ''}<div class="g24-slot"></div></div>`);
   let board;
   board = mount24(body.querySelector('.g24-slot'), ctx, {
+    target: P.target || 24, max: P.max || 9,
+    onNew: (T) => { const b = body.querySelector('.gb-target b'); b.textContent = T; b.animate?.([{ transform: 'scale(1.4)' }, { transform: 'none' }], { duration: 300 }); },
     onSolve: () => {
       if (over) return;
       if (!board.hinted()) solved++;
@@ -158,13 +194,14 @@ function game24(ctx) {
   });
   const timer = setInterval(() => {
     if (over) return;
-    left--; body.querySelector('.gb-time').textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    left--; body.querySelector('.gb-time').textContent = clock(left);
     body.querySelector('.gb-time').classList.toggle('low', left <= 15);
     if (left <= 0) {
       over = true; clearInterval(timer);
+      if (o.stage) return o.end(body, { value: solved, big: solved, unit: solved === 1 ? 'puzzle' : 'puzzles', line: 'Puzzles where you used “Show a way” don’t count', share: `I solved ${solved} puzzles on level ${o.idx + 1} of 24 on MathScroll!` });
       const xp = solved * 10; const isBest = ctx.recordBest('g24', solved);
       ctx.gameDone('g24', xp, { solved24: solved });
-      showResult(body, ctx, { title: 'Time!', big: solved, unit: solved === 1 ? 'puzzle' : 'puzzles', line: `${isBest ? 'New best! ' : ''}+${xp} XP · puzzles where you used “Show a way” don’t count`, again: () => game24(ctx), share: `I solved ${solved} “make 24” puzzles in 2 minutes on MathScroll!` });
+      showResult(body, ctx, { title: 'Time!', big: solved, unit: solved === 1 ? 'puzzle' : 'puzzles', line: `${isBest ? 'New best! ' : ''}+${xp} XP · puzzles where you used “Show a way” don’t count`, again: () => game24(ctx, { endless: true }), share: `I solved ${solved} “make 24” puzzles in 2 minutes on MathScroll!` });
     }
   }, 1000);
   const stop24 = () => { over = true; clearInterval(timer); }; stop24.onReplace = true;
@@ -236,18 +273,21 @@ const SHAPES = [
   [[0, 0], [1, 1]], [[0, 1], [1, 0]], [[0, 0], [1, 1], [2, 2]], [[0, 2], [1, 1], [2, 0]],
 ];
 const BB_COLORS = ['#f87171', '#fb923c', '#facc15', '#4ade80', '#22d3ee', '#818cf8', '#e879f9'];
-function blockBlast(ctx) {
-  const N = 8;
+const STONE = '#64748b'; const GEM = '#c084fc';
+function blockBlast(ctx, o = {}) {
+  const N = 8; const P = o.p || {}; const camp = !!o.stage;
   let board = Array.from({ length: N }, () => Array(N).fill(null));
   let tray = []; let score = 0; let combo = 0; let over = false; let revives = 2; let bombMode = false; let placed = 0;
+  let piecesLeft = P.pieces || Infinity; const gems = new Set(); let gemsGot = 0;
   const best = ctx.bests().blockblast || 0;
   const body = el(`<div class="blockblast">
-    <div class="gb-top"><span class="gb-score">0</span><span class="bb-best">Best ${best}</span>${chargePill(ctx)}</div>
+    <div class="gb-top"><span class="gb-score">0</span>${camp ? `<span class="bb-left">🧩 <b>${piecesLeft}</b></span>${P.gems ? `<span class="bb-gems">💎 <b>0</b>/${P.gems}</span>` : ''}` : `<span class="bb-best">Best ${best}</span>`}${chargePill(ctx)}</div>
+    ${camp ? `<div class="stage-bar"><b>Level ${o.idx + 1}</b> ${o.stage.starText}${P.gems ? ' · collect every 💎' : ''}</div>` : ''}
     <div class="bb-combo"></div>
     <div class="bb-board"></div>
     <div class="bb-tray"></div>
     <div class="gb-actions"><button class="btn ghost small bb-bomb">💣 Bomb · 1⚡</button><button class="btn ghost small bb-reroll">🔄 Swap pieces · 1⚡</button></div>
-    <p class="small bb-help">Drag a piece onto the board. Fill a whole row or column to clear it. Every three pieces cost 1 ⚡.</p></div>`);
+    <p class="small bb-help">Drag a piece onto the board. Fill a whole row or column to clear it. ${camp ? `You have ${P.pieces} pieces.${P.stones ? ' Grey stones clear like any block.' : ''}${P.gems ? ' Clear a 💎’s row or column to collect it.' : ''}` : 'Every three pieces cost 1 ⚡.'}</p></div>`);
   const refresh = wireCharge(body, ctx);
   const boardEl = body.querySelector('.bb-board'); const trayEl = body.querySelector('.bb-tray');
   for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) boardEl.appendChild(el(`<div class="bb-cell" data-r="${r}" data-c="${c}"></div>`));
@@ -259,7 +299,28 @@ function blockBlast(ctx) {
     for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
       const e = cellEl(r, c); const v = board[r][c];
       e.style.background = v || ''; e.classList.toggle('full', !!v);
+      e.classList.toggle('stone', v === STONE); e.classList.toggle('gem', gems.has(`${r},${c}`));
     }
+    const l = body.querySelector('.bb-left b'); if (l) l.textContent = piecesLeft;
+    const gg = body.querySelector('.bb-gems b'); if (gg) gg.textContent = gemsGot;
+  };
+  // Campaign levels start with stones and gems on the board (never a full line).
+  const seed = () => {
+    const free = []; for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) free.push([r, c]);
+    for (let i = free.length - 1; i > 0; i--) { const j = rnd(i + 1); [free[i], free[j]] = [free[j], free[i]]; }
+    const ok = (r, c) => board[r].filter(Boolean).length < N - 2 && board.filter((row) => row[c]).length < N - 2;
+    let k = 0;
+    for (const [r, c] of free) {
+      if (k >= (P.stones || 0) + (P.gems || 0)) break;
+      if (!ok(r, c)) continue;
+      if (k < (P.gems || 0)) { board[r][c] = GEM; gems.add(`${r},${c}`); } else board[r][c] = STONE;
+      k++;
+    }
+  };
+  const finishStage = () => {
+    if (over) return; over = true;
+    const fail = P.gems && gemsGot < P.gems;
+    o.end(body, { value: score, fail, big: score, unit: 'points', line: `${P.gems ? `💎 ${gemsGot}/${P.gems}` : ''}${fail ? ' — collect every gem to pass' : ''}`.trim(), share: `I scored ${score} on Block Blast level ${o.idx + 1} on MathScroll!` });
   };
   // Each new set of three pieces costs 1 ⚡ (solve a problem if you're out).
   const buyTray = async () => {
@@ -267,9 +328,10 @@ function blockBlast(ctx) {
     if (await payOrSolve(ctx, 'get the next three pieces')) { newTray(); refresh(); checkStuck(); } else { trayEl.innerHTML = '<button class="btn wide bb-buy">Solve a problem for the next pieces</button>'; trayEl.querySelector('.bb-buy').addEventListener('click', buyTray); }
   };
   const newTray = () => {
+    const n = Math.min(3, piecesLeft);
     for (let tries = 0; tries < 30; tries++) {
-      tray = [0, 1, 2].map(() => ({ shape: SHAPES[rnd(SHAPES.length)], color: BB_COLORS[rnd(BB_COLORS.length)] }));
-      if (tray.some((p) => fitsAnywhere(p.shape))) break;
+      tray = [0, 1, 2].map((k) => (k < n ? { shape: SHAPES[rnd(SHAPES.length)], color: BB_COLORS[rnd(BB_COLORS.length)] } : null));
+      if (tray.some((p) => p && fitsAnywhere(p.shape))) break;
     }
     drawTray();
   };
@@ -294,7 +356,7 @@ function blockBlast(ctx) {
   const place = (i, r0, c0) => {
     const p = tray[i];
     p.shape.forEach(([r, c]) => { board[r0 + r][c0 + c] = p.color; });
-    tray[i] = null; placed++;
+    tray[i] = null; placed++; if (camp) piecesLeft--;
     let gained = p.shape.length;
     const { rows, cols } = linesFor([], 0, 0);
     const lines = rows.length + cols.length;
@@ -309,6 +371,7 @@ function blockBlast(ctx) {
         const [r, c] = k.split(',').map(Number); const ce = cellEl(r, c); const b = ce.getBoundingClientRect();
         burst(b.left + b.width / 2, b.top + b.height / 2, { color: board[r][c] || '#facc15', n: 4, spread: 50, size: 7 });
         ce.classList.add('blast'); board[r][c] = null;
+        if (gems.delete(k)) { gemsGot++; gained += 50; popText(b.left + b.width / 2, b.top, '💎 +50', '#c084fc'); }
       });
       { const b = boardEl.getBoundingClientRect(); popText(b.left + b.width / 2, b.top + b.height / 2, `+${pts}${combo > 1 ? ` ×${combo}` : ''}`); }
       if (lines >= 3) confetti();
@@ -325,7 +388,8 @@ function blockBlast(ctx) {
     score += gained;
     body.querySelector('.gb-score').textContent = score;
     setTimeout(drawBoard, lines ? 300 : 0); if (!lines) drawBoard();
-    if (tray.every((x) => !x)) { drawTray(); setTimeout(buyTray, lines ? 400 : 150); return; }
+    if (camp && piecesLeft <= 0) { drawTray(); setTimeout(finishStage, lines ? 700 : 400); return; }
+    if (tray.every((x) => !x)) { drawTray(); setTimeout(camp ? () => { newTray(); checkStuck(); } : buyTray, lines ? 400 : 150); return; }
     drawTray();
     setTimeout(checkStuck, lines ? 320 : 50);
   };
@@ -338,7 +402,7 @@ function blockBlast(ctx) {
   const stuck = () => {
     const panel = el(`<div class="bb-stuck"><b>No room left!</b>
       ${revives ? `<p>Solve a problem to clear space and keep your ${score} points. (${revives} left)</p><button class="btn wide revive">Solve to continue</button>` : '<p>No second chances left.</p>'}
-      <button class="btn ghost wide end">End game</button></div>`);
+      <button class="btn ghost wide end">${camp ? 'Finish level' : 'End game'}</button></div>`);
     body.appendChild(panel);
     panel.scrollIntoView({ block: 'center', behavior: 'smooth' });
     panel.querySelector('.end').addEventListener('click', () => { panel.remove(); end(); });
@@ -357,12 +421,13 @@ function blockBlast(ctx) {
     });
   };
   const end = () => {
+    if (camp) return finishStage();
     if (over) return;
     over = true;
     const xp = Math.min(120, Math.round(score / 15));
     const isBest = ctx.recordBest('blockblast', score);
     ctx.gameDone('blockblast', xp);
-    showResult(body, ctx, { title: 'Game over', big: score, unit: 'points', line: `${isBest ? 'New best! ' : ''}+${xp} XP`, again: () => startGame('blockblast', ctx), share: `I scored ${score} in Block Blast on MathScroll. Beat that!` });
+    showResult(body, ctx, { title: 'Game over', big: score, unit: 'points', line: `${isBest ? 'New best! ' : ''}+${xp} XP`, again: () => startGame('blockblast', ctx, { endless: true }), share: `I scored ${score} in Block Blast on MathScroll. Beat that!` });
   };
   // ---- dragging
   let drag = null;
@@ -417,7 +482,7 @@ function blockBlast(ctx) {
     if (!spend(ctx, refresh, 'A bomb')) return;
     bombMode = false; body.querySelector('.bb-bomb').classList.remove('on');
     const r0 = +t.dataset.r; const c0 = +t.dataset.c;
-    for (let r = r0 - 1; r <= r0 + 1; r++) for (let c = c0 - 1; c <= c0 + 1; c++) if (r >= 0 && r < N && c >= 0 && c < N) { board[r][c] = null; cellEl(r, c).classList.add('blast'); }
+    for (let r = r0 - 1; r <= r0 + 1; r++) for (let c = c0 - 1; c <= c0 + 1; c++) if (r >= 0 && r < N && c >= 0 && c < N) { if (gems.delete(`${r},${c}`)) gemsGot++; board[r][c] = null; cellEl(r, c).classList.add('blast'); }
     ctx.sound('crit');
     setTimeout(() => { boardEl.querySelectorAll('.blast').forEach((x) => x.classList.remove('blast')); drawBoard(); drawTray(); }, 300);
   });
@@ -425,23 +490,26 @@ function blockBlast(ctx) {
     if (over || !spend(ctx, refresh, 'New pieces')) return;
     newTray(); ctx.sound('quest');
   });
-  tray = [null, null, null]; drawTray(); drawBoard();
+  tray = [null, null, null]; if (camp) seed(); drawTray(); drawBoard();
   const stop = () => { over = true; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); drag?.f.remove(); };
   stop.onReplace = true;
   ctx.openSheet('Block Blast', body, 'tall', stop);
-  buyTray();
-  body._test = { board: () => board, tray: () => tray, place, fits };
+  if (camp) { newTray(); checkStuck(); } else buyTray();
+  body._test = { board: () => board, tray: () => tray, place, fits, gems: () => gems, left: () => piecesLeft };
 }
 
 // ------------------------------------------------------------------ Chess puzzles
 const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
 const glyph = (p) => `<span class="cp ${p >= 'A' && p <= 'Z' ? 'w' : 'b'}">${GLYPH[p.toLowerCase()]}︎</span>`;
 const THEME_NAMES = { mateIn1: 'Mate in 1', mateIn2: 'Mate in 2', mateIn3: 'Mate in 3', fork: 'Fork', pin: 'Pin', skewer: 'Skewer', hangingPiece: 'Hanging piece', discoveredAttack: 'Discovered attack', sacrifice: 'Sacrifice', promotion: 'Promotion', endgame: 'Endgame', backRankMate: 'Back-rank mate', deflection: 'Deflection', attraction: 'Attraction', trappedPiece: 'Trapped piece', doubleCheck: 'Double check' };
-async function chess(ctx) {
-  if (!(await payOrSolve(ctx, 'play a chess puzzle'))) return;
-  const rating = ctx.puzzleRating();
+async function chess(ctx, o = {}) {
+  const camp = !!o.stage; const P = o.p || {};
+  if (!camp && !(await payOrSolve(ctx, 'play a chess puzzle'))) return;
+  const run = o.run || (o.run = { done: 0, solved: 0, mistakes: 0, hints: 0 });
+  const rating = camp ? P.rating : ctx.puzzleRating();
   const body = el(`<div class="chess">
-    <div class="gb-top"><span class="ch-vs">Rating <b class="ch-rating">${rating}</b></span><span class="ch-status">Loading puzzle…</span>${chargePill(ctx)}</div>
+    <div class="gb-top"><span class="ch-vs">Rating <b class="ch-rating">${ctx.puzzleRating()}</b></span><span class="ch-status">Loading puzzle…</span>${chargePill(ctx)}</div>
+    ${camp ? `<div class="stage-bar"><b>Level ${o.idx + 1} · puzzle ${run.done + 1}/${P.n}</b> ${'❤️'.repeat(Math.max(0, P.lives - run.mistakes))}${'🖤'.repeat(Math.min(P.lives, run.mistakes))}</div>` : ''}
     <div class="ch-cap ch-tags"></div>
     <div class="ch-board"></div>
     <div class="gb-actions"><button class="btn ghost small ch-hint">💡 Hint · 1⚡</button><button class="btn ghost small ch-sol" hidden>Show solution</button><button class="btn small ch-next" hidden>Next puzzle · 1⚡</button></div>
@@ -452,7 +520,7 @@ async function chess(ctx) {
   let s = null; let moves = []; let step = 1; let sel = null; let last = null; let hint = null; let flip = false; let done = false; let failed = false; let busy = true; let puzzle = null; let sans = [];
   ctx.openSheet('Chess puzzle', body, 'tall', Object.assign(() => { done = true; }, { onReplace: true }));
   try { puzzle = await ctx.chessPuzzle(rating); } catch {
-    setStatus('Couldn’t load a puzzle — check your connection'); ctx.refund(1); refresh(); return;
+    setStatus('Couldn’t load a puzzle — check your connection'); if (!camp || !run.done) ctx.refund(1); refresh(); return;
   }
   s = fromFEN(puzzle.fen); moves = puzzle.moves;
   flip = s.w; // the opponent moves first, so you play the other colour
@@ -481,6 +549,11 @@ async function chess(ctx) {
     if (solved) { setStatus(`Solved! +${xp} XP`, 'ok'); ctx.sound('level'); confetti(); } else setStatus('Puzzle failed', 'no');
     body.querySelector('.ch-hint').hidden = true;
     body.querySelector('.ch-next').hidden = false;
+    if (camp) {
+      run.done++; if (solved) run.solved++; else run.mistakes++;
+      const out = run.mistakes >= P.lives; const fin = run.done >= P.n;
+      body.querySelector('.ch-next').textContent = out || fin ? 'See results' : `Next puzzle (${run.done + 1}/${P.n})`;
+    }
     body.querySelector('.ch-sol').hidden = solved;
     render();
   };
@@ -530,6 +603,7 @@ async function chess(ctx) {
   });
   body.querySelector('.ch-hint').addEventListener('click', () => {
     if (busy || done || !spend(ctx, refresh, 'A hint')) return;
+    run.hints++;
     const m = moveFromUci(s, moves[step]); hint = m ? m.from : null; sel = hint; setStatus('Move this piece'); render();
   });
   body.querySelector('.ch-sol').addEventListener('click', () => {
@@ -539,5 +613,12 @@ async function chess(ctx) {
     const tick = () => { if (k >= rest.length || !body.isConnected) return; const m = moveFromUci(s, rest[k++]); if (m) play(m); hint = null; render(); setTimeout(tick, 700); };
     tick();
   });
-  body.querySelector('.ch-next').addEventListener('click', () => startGame('chess', ctx));
+  body.querySelector('.ch-next').addEventListener('click', () => {
+    if (!camp) return startGame('chess', ctx, { endless: true });
+    if (run.mistakes >= P.lives || run.done >= P.n) {
+      const fail = run.mistakes >= P.lives;
+      return o.end(body, { fail, stars: run.mistakes === 0 ? (run.hints ? 2 : 3) : 1, big: `${run.solved}/${P.n}`, unit: 'solved', line: `${run.mistakes} mistake${run.mistakes === 1 ? '' : 's'} · ${run.hints} hint${run.hints === 1 ? '' : 's'}`, share: `I beat chess level ${o.idx + 1} (${P.rating}) on MathScroll!` });
+    }
+    chess(ctx, o);
+  });
 }

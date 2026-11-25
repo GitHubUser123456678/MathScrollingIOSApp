@@ -2,12 +2,12 @@ import { SOURCES, PROBLEM_TOPICS, escapeHTML, textToHtml, answerFor, searchAll, 
 import { renderContent } from './render.js';
 import { exprValue, sameValue } from './expr.js';
 import * as cloud from './cloud.js';
-import { openGames, mount24, GAMES, payOrSolve, gameOfDay, startGame } from './games.js';
+import { openGames as openGamesRaw, mount24, GAMES, payOrSolve, gameOfDay, startGame as startGameRaw } from './games.js';
 import { quickQuestion, QUICK_KINDS, burst as fxBurst, popText, confetti } from './games2.js';
 import { sparkCard } from './spark.js';
 // Discover: maths for everyone (fun facts, brain teasers, visual proofs, number spotlights).
 SOURCES.spark = { label: 'Discover', short: 'Discover', fetch: async () => sparkCard(), blurb: 'Fun facts, brain teasers, visual proofs and number spotlights' };
-import { openLearn } from './learn.js';
+import { openLearn as openLearnRaw } from './learn.js';
 
 // Where shared post links point. On the website it's the site itself; inside the iOS app it's the public site.
 const PUBLIC_URL = location.protocol === 'https:'
@@ -447,29 +447,55 @@ function openRecap() {
   openSheet('Session recap', body);
 }
 
-// ------------------------------------------------------------------ account-only features
-// With accounts set up, leaderboards, the daily challenge, ranked sprints and unlimited saves need one.
-// Before accounts are set up (config.js empty), nothing is locked.
+// ------------------------------------------------------------------ accounts
+// Once accounts are set up (config.js filled in), guests get a short taste of the feed and then need a
+// free account for everything: the feed, Learn, Games, Numeria and posting. Before setup nothing is locked.
+const GUEST_TASTE = 10;
 const needsAccount = () => cloud.cloudEnabled && !cloud.currentUser();
+const PERKS = `<ul class="perks">
+      <li><b>The endless feed</b>: contest problems, proofs, puzzles and Discover cards</li>
+      <li><b>Learn</b>: courses, lectures, bosses and olympiad tracks</li>
+      <li><b>Games</b>: 12 games with 144 campaign levels, and the Numeria MMO</li>
+      <li><b>Daily challenge, leaderboards</b> and ranked sprints</li>
+      <li><b>Your XP, streaks and badges</b> saved on every device</li>
+      <li><b>Post, like and comment</b> in Community</li>
+    </ul>`;
 function requireAccount(feature) {
   if (!needsAccount()) return false;
   const body = document.createElement('div');
   body.className = 'gate';
-  body.innerHTML = `<div class="gate-icon">★</div><h3>${escapeHTML(feature)} needs a free account</h3>
-    <ul class="perks">
-      <li><b>Daily challenge</b> with your daily streak and how everyone else did</li>
-      <li><b>Leaderboards</b>: climb the weekly and all-time XP rankings</li>
-      <li><b>Ranked sprints</b> against other players</li>
-      <li><b>Unlimited saves</b>, and your XP, stats and badges kept safe on any device</li>
-      <li><b>Post, like and comment</b> in Community</li>
-    </ul>
+  body.innerHTML = `<div class="gate-icon">★</div><h3>${escapeHTML(feature)} needs a free account</h3>${PERKS}
     <button class="btn wide create">Create free account</button>
     <button class="btn ghost wide signin">I have an account</button>`;
   $('.create', body).addEventListener('click', () => openAuth('', 'signup'));
   $('.signin', body).addEventListener('click', () => openAuth('', 'signin'));
-  openSheet('Unlock with an account', body);
+  openSheet('Free account needed', body);
   return true;
 }
+// Gated entry points: everything outside the feed's free taste goes through these.
+function openLearn(c) { if (requireAccount('Learn')) return; openLearnRaw(c); }
+function openGames(c) { if (requireAccount('Games')) return; openGamesRaw(c); }
+function startGame(id, c, ...a) { if (requireAccount('Games')) return; startGameRaw(id, c, ...a); }
+// The wall that covers the feed when a guest's taste runs out.
+function guestSeen() {
+  if (!needsAccount()) return;
+  const n = store.get('guestViews', 0) + 1;
+  store.set('guestViews', n);
+  if (n > GUEST_TASTE) showWall();
+}
+function showWall() {
+  if (!needsAccount() || $('.acct-wall')) return;
+  const w = document.createElement('div');
+  w.className = 'acct-wall';
+  w.innerHTML = `<div class="aw-card"><div class="aw-sigma">∑</div><h2>Enjoying MathScroll?</h2>
+    <p>You’ve seen your ${GUEST_TASTE} free cards. Make a free account to keep scrolling and unlock everything:</p>${PERKS}
+    <button class="btn wide create">Create free account</button><button class="btn ghost wide signin">I have an account</button>
+    <p class="small">Free forever. No ads. Just a username, email and password.</p></div>`;
+  $('.create', w).addEventListener('click', () => openAuth('', 'signup'));
+  $('.signin', w).addEventListener('click', () => openAuth('', 'signin'));
+  document.body.appendChild(w);
+}
+function hideWall() { $('.acct-wall')?.remove(); }
 
 // ------------------------------------------------------------------ theme
 function applyTheme() {
@@ -1483,7 +1509,7 @@ const observer = new IntersectionObserver((entries) => {
       e.target.classList.remove('enter'); void e.target.offsetWidth; e.target.classList.add('enter');
       e.target._checkOverflow?.();
       const c = state.cards.find((x) => x.el === e.target);
-      if (c) markSeen(c.data.id);
+      if (c) { markSeen(c.data.id); guestSeen(); }
       onCardShown(e.target, c?.data, prev?.data, dwell);
       fill();
     }
@@ -1978,6 +2004,7 @@ function openProfile() {
 // ------------------------------------------------------------------ compose
 const DRAFT_KEY = 'draft';
 function openCompose() {
+  if (requireAccount('Posting')) return;
   const draft = store.get(DRAFT_KEY, { k: 'problem', t: '', b: '', a: '', s: '' });
   const body = document.createElement('div');
   body.className = 'compose';
@@ -2351,6 +2378,9 @@ const BEST_LABEL = { g2048: (v) => `${v} pts`, lights: (v) => `Level ${v}`, hano
 const gameCtx = {
   openSheet: (...a) => openSheet(...a), closeSheet: () => closeSheet(), toast: (m) => toast(m), sound: (k) => sound(k), shareText: (t) => shareText(t),
   bests: () => state.stats.games || {},
+  campaign: () => (state.stats.camp ||= {}),
+  saveCampaign: () => saveStats(),
+  gainXp: (n) => gainXp(n),
   charges: () => (state.stats.charges ??= 3),
   spend(n) { if (gameCtx.charges() < n) return false; state.stats.charges -= n; saveStats(); return true; },
   refund(n) { state.stats.charges = gameCtx.charges() + n; saveStats(); },
@@ -3004,10 +3034,13 @@ async function boot() {
     const now = !!u;
     if (now === wasSignedIn) return;
     wasSignedIn = now;
+    if (now) hideWall(); else if (store.get('guestViews', 0) > GUEST_TASTE) showWall();
     state.pins = state.pins.filter((p) => !p.daily);
     renderTabs(); resetFeed(); loadDaily(); renderLevel();
   });
+  if (!cloud.currentUser() && cloud.cloudEnabled && /^#sign(up|in)$/.test(location.hash)) { const m = location.hash.slice(1); history.replaceState(null, '', location.pathname + location.search); setTimeout(() => openAuth('', m), 500); }
   if (cloud.currentUser()) pullSync();
+  else if (needsAccount() && store.get('guestViews', 0) > GUEST_TASTE) showWall();
   document.addEventListener('visibilitychange', () => { if (document.hidden && cloud.currentUser()) { clearTimeout(syncTimer); pushSync(); } });
   window.addEventListener('online', () => { if (errorShown) { state.failures = {}; fill(); } });
   window.addEventListener('hashchange', async () => {
