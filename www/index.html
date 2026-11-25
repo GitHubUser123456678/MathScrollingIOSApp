@@ -25,13 +25,14 @@
     <button class="icon-btn" id="searchBtn" aria-label="Search">
       <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
     </button>
-    <button class="icon-btn create" id="createBtn" aria-label="New post">
-      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-    </button>
-    <button class="icon-btn" id="profileBtn" aria-label="Profile">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></svg>
-    </button>
   </header>
+  <nav class="bottombar" aria-label="Main">
+    <button data-nav="home" class="on" aria-label="Home"><svg viewBox="0 0 24 24"><path d="M4 11l8-6 8 6v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/></svg><span>Home</span></button>
+    <button data-nav="learn" aria-label="Learn"><svg viewBox="0 0 24 24"><path d="M3 9l9-4 9 4-9 4-9-4z"/><path d="M7 11v4c0 1.5 2.2 3 5 3s5-1.5 5-3v-4"/></svg><span>Learn</span></button>
+    <button id="createBtn" class="nav-plus" aria-label="New post"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button data-nav="games" aria-label="Games"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="10" rx="4"/><path d="M8 11v4M6 13h4"/><circle cx="15.5" cy="12" r=".9"/><circle cx="17.5" cy="14.5" r=".9"/></svg><span>Games</span></button>
+    <button id="profileBtn" data-nav="me" aria-label="Profile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></svg><span>Me</span></button>
+  </nav>
 
   <div class="xpbar" id="xpbar" aria-hidden="true"><span class="fill"></span><span class="pips"></span></div>
   <button class="chest-btn" id="chestBtn" hidden aria-label="Open your chest">🎁<b></b></button>

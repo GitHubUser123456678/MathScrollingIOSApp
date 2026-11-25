@@ -223,7 +223,7 @@ function sanitize(root, base) {
       const cls = child.getAttribute('class') || '';
       for (const a of [...child.attributes]) child.removeAttribute(a.name);
       for (const [k, v] of Object.entries(keep)) if (v != null) child.setAttribute(k, v);
-      const keepCls = cls.split(/\s+/).filter((c) => /^(asy|tex-img|eqn|eqn-l|eqn-r|eqn-c|diagram-note|qed|pw-display|oeis-name|hint|plain|figure|tex-table|tex-list|tex-raw|wiki-img|fig-cap|img-missing)$/.test(c));
+      const keepCls = cls.split(/\s+/).filter((c) => /^(asy|tex-img|eqn|eqn-l|eqn-r|eqn-c|diagram-note|qed|pw-display|oeis-name|hint|plain|figure|tex-table|tex-list|tex-raw|wiki-img|fig-cap|img-missing|sp-emoji|sp-lead|sp-sub)$/.test(c));
       if (keepCls.length) child.setAttribute('class', keepCls.join(' '));
       if (tag === 'A') {
         const href = keep.href || '';

@@ -3,7 +3,10 @@ import { renderContent } from './render.js';
 import { exprValue, sameValue } from './expr.js';
 import * as cloud from './cloud.js';
 import { openGames, mount24, GAMES, payOrSolve, gameOfDay, startGame } from './games.js';
-import { quickQuestion, QUICK_KINDS } from './games2.js';
+import { quickQuestion, QUICK_KINDS, burst as fxBurst, popText, confetti } from './games2.js';
+import { sparkCard } from './spark.js';
+// Discover: maths for everyone (fun facts, brain teasers, visual proofs, number spotlights).
+SOURCES.spark = { label: 'Discover', short: 'Discover', fetch: async () => sparkCard(), blurb: 'Fun facts, brain teasers, visual proofs and number spotlights' };
 import { openLearn } from './learn.js';
 
 // Where shared post links point. On the website it's the site itself; inside the iOS app it's the public site.
@@ -24,8 +27,8 @@ const store = {
 };
 
 const DEFAULT_SETTINGS = {
-  sources: { contest: true, math: true, omni: true, olympiad: true, aops: true, proofwiki: true, oeis: true, wikipedia: true },
-  weights: { contest: 20, math: 14, omni: 10, olympiad: 12, aops: 10, proofwiki: 14, oeis: 9, wikipedia: 13 },
+  sources: { spark: true, contest: true, math: true, omni: true, olympiad: true, aops: true, proofwiki: true, oeis: true, wikipedia: true },
+  weights: { spark: 18, contest: 20, math: 14, omni: 10, olympiad: 12, aops: 10, proofwiki: 14, oeis: 9, wikipedia: 13 },
   filters: { ...DEFAULT_FILTERS },
   topics: [...PROBLEM_TOPICS],
   personalise: true,
@@ -594,9 +597,8 @@ async function postLink(p) {
 // ------------------------------------------------------------------ tabs
 const TABS = [
   { id: 'mix', label: 'For you' },
+  { id: 'spark', label: '✨ Discover' },
   { id: 'community', label: 'Community' },
-  { id: 'learn', label: '🎓 Learn' },
-  { id: 'games', label: '🎮 Games' },
   { id: 'contest', label: 'AMC/AIME' },
   { id: 'math', label: 'MATH' },
   { id: 'omni', label: 'Omni' },
@@ -617,7 +619,7 @@ function renderTabs() {
   for (const t of TABS) {
     if (t.id === 'community' ? !cloud.cloudEnabled : t.id !== 'mix' && t.id !== 'games' && t.id !== 'learn' && !state.settings.sources[t.id]) continue;
     const b = h(`<button role="tab" class="tab" data-tab="${t.id}" aria-selected="${state.tab === t.id}">${t.label}</button>`);
-    b.addEventListener('click', () => (t.id === 'games' ? openGames(gameCtx) : t.id === 'learn' ? openLearn(learnCtx) : switchTab(t.id)));
+    b.addEventListener('click', () => switchTab(t.id));
     nav.appendChild(b);
   }
   nav.querySelector('[aria-selected="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
@@ -810,12 +812,18 @@ const SOURCE_META = {
   proofwiki: { tag: 'Theorem', cls: 's-proof', from: 'ProofWiki' },
   oeis: { tag: 'Sequence', cls: 's-oeis', from: 'OEIS' },
   post: { tag: 'Post', cls: 's-post', from: '' },
+  spark: { tag: 'Discover', cls: 's-spark', from: 'Discover' },
 };
+const SPARK_TAG = { fact: 'Fun fact', teaser: 'Brain teaser', proof: 'Visual proof', number: 'Number spotlight' };
+// Big faint symbol behind each card, and a little icon in its label.
+const GLYPH = { contest: 'Σ', math: 'π', omni: '∞', aops: '◇', olympiad: '★', wikipedia: '∫', proofwiki: '∴', oeis: 'ℕ', post: '✎', fact: '!', teaser: '?', proof: '△', number: '#' };
+const ICON = { contest: '🏆', math: '📐', omni: '🌌', aops: '💬', olympiad: '🥇', wikipedia: '📖', proofwiki: '📜', oeis: '🔢', post: '✍️', fact: '💡', teaser: '🧩', proof: '👁️', number: '🔮' };
 const metaFor = (d) => {
   if (d.source === 'post') return { ...SOURCE_META.post, tag: d.kind || 'Post', from: `${d.cloudId ? '' : 'by '}${d.author}${d.date ? ` · ${timeAgo(d.date)}` : ''}` };
+  if (d.source === 'spark') return { tag: SPARK_TAG[d.kind] || 'Discover', cls: `s-spark k-${d.kind}`, from: 'Discover' };
   return SOURCE_META[d.source] || SOURCE_META.wikipedia;
 };
-const isProblem = (d) => ['contest', 'aops', 'olympiad', 'math', 'omni'].includes(d.source) || (d.source === 'post' && d.postKind === 'problem');
+const isProblem = (d) => ['contest', 'aops', 'olympiad', 'math', 'omni'].includes(d.source) || (d.source === 'post' && d.postKind === 'problem') || (d.source === 'spark' && !!d.answer);
 const inList = (key, id) => state[key].some((s) => s.id === id);
 
 function buildCard(data, { standalone = false, onAnswered = null } = {}) {
@@ -823,10 +831,11 @@ function buildCard(data, { standalone = false, onAnswered = null } = {}) {
   const meta = metaFor(data);
   const isSaved = inList('saved', data.id);
   const isLiked = inList('liked', data.id);
-  const el = h(`<section class="card ${meta.cls}" data-id="${escapeHTML(data.id)}">
+  const gk = data.source === 'spark' ? data.kind : data.source;
+  const el = h(`<section class="card ${meta.cls}" data-id="${escapeHTML(data.id)}" data-glyph="${GLYPH[gk] || 'Σ'}">
     <div class="card-inner">
       ${data.banner ? `<div class="shared-banner">${escapeHTML(data.banner)}</div>` : ''}
-      <div class="meta"><span class="pill">${escapeHTML(meta.tag)}</span><span class="where">${escapeHTML(meta.from)}</span>${diffChip(data)}</div>
+      <div class="meta"><span class="pill"><i class="pill-ic">${ICON[gk] || '✦'}</i>${escapeHTML(meta.tag)}</span><span class="where">${escapeHTML(meta.from)}</span>${diffChip(data)}</div>
       <h2 class="heading">${escapeHTML(data.heading)}</h2>
       <div class="content"></div>
     </div>
@@ -848,6 +857,9 @@ function buildCard(data, { standalone = false, onAnswered = null } = {}) {
     content.innerHTML = '<p>Couldn’t display this one.</p>';
   }
   if (data.terms && data.terms.length) content.appendChild(termsGame(data, el));
+  if (data.widget === 'proof') content.appendChild(proofWidget(data));
+  if (data.widget === 'number') content.appendChild(numberWidget(data));
+  if (data.widget === 'react') content.appendChild(reactWidget(data));
   if (isProblem(data)) content.appendChild(answerBox(data, el, onAnswered));
 
   $('.like', el).addEventListener('click', (e) => (data.cloudId ? toggleCloudLike(data, e.currentTarget) : toggleList('liked', data, e.currentTarget)));
@@ -878,7 +890,7 @@ function buildCard(data, { standalone = false, onAnswered = null } = {}) {
     const hidden = inner.scrollHeight - inner.scrollTop - inner.clientHeight > 8;
     inner.classList.toggle('overflows', hidden);
     // Long card: offer to read it all in a sheet (scrolling inside a swipe feed can be fiddly on phones).
-    if (!standalone && inner.scrollHeight > inner.clientHeight + 40 && !more) {
+    if (!standalone && !data.widget && inner.scrollHeight > inner.clientHeight + 40 && !more) {
       more = h('<button class="read-more">Read full ↓</button>');
       more.addEventListener('click', () => openCard(data));
       el.appendChild(more);
@@ -891,6 +903,69 @@ function buildCard(data, { standalone = false, onAnswered = null } = {}) {
   setTimeout(checkOverflow, 400);
   el._checkOverflow = checkOverflow;
   return el;
+}
+
+// ------------------------------------------------------------------ answer feedback & Discover widgets
+const PRAISE = ['Correct!', 'Nailed it!', 'Brilliant!', 'Spot on!', 'Yes! 🎉', 'Great thinking!', 'You got it!'];
+const pickPraise = () => PRAISE[Math.floor(Math.random() * PRAISE.length)];
+function celebrate(btn, ok, cardEl) {
+  const r = btn.getBoundingClientRect(); const x = r.left + r.width / 2; const y = r.top + r.height / 2;
+  if (ok) {
+    fxBurst(x, y, { color: ['#4ade80', '#facc15', '#60a5fa', '#f472b6'], n: 22, spread: 110 });
+    if (state.stats.streak + 1 >= 5 && (state.stats.streak + 1) % 5 === 0) confetti();
+  } else {
+    cardEl.classList.remove('shake'); void cardEl.offsetWidth; cardEl.classList.add('shake');
+  }
+}
+// Visual proof: step through pictures.
+function proofWidget(data) {
+  const p = data.proof; let k = 0;
+  const w = h(`<div class="vp"><div class="vp-stage"></div><div class="vp-cap"></div><div class="vp-note"></div>
+    <div class="vp-nav"><button class="btn ghost small vp-prev" aria-label="Previous step">‹</button><div class="vp-dots">${p.steps.map(() => '<i></i>').join('')}</div><button class="btn small vp-next">Next step ›</button></div></div>`);
+  const show = () => {
+    const st = p.steps[k];
+    $('.vp-stage', w).innerHTML = st.svg;
+    $('.vp-stage svg', w).animate([{ opacity: 0.2, transform: 'scale(.97)' }, { opacity: 1, transform: 'none' }], { duration: 300, easing: 'ease-out' });
+    const cap = $('.vp-cap', w); cap.innerHTML = ''; cap.appendChild(renderContent(`<span>${escapeHTML(st.cap)}</span>`, { base: 'text', dollar: true }));
+    const note = $('.vp-note', w); note.innerHTML = ''; note.appendChild(renderContent(`<span>${escapeHTML(st.note)}</span>`, { base: 'text', dollar: true }));
+    w.querySelectorAll('.vp-dots i').forEach((d, j) => d.classList.toggle('on', j <= k));
+    $('.vp-prev', w).disabled = k === 0;
+    const last = k === p.steps.length - 1;
+    $('.vp-next', w).textContent = last ? 'Start again ↺' : 'Next step ›';
+    if (last && !w.dataset.done) { w.dataset.done = '1'; gainXp(5); engage('spark', 2); questEvent('solve'); }
+  };
+  $('.vp-next', w).addEventListener('click', () => { k = k === p.steps.length - 1 ? 0 : k + 1; sound('click'); show(); });
+  $('.vp-prev', w).addEventListener('click', () => { if (k) { k--; show(); } });
+  show();
+  return w;
+}
+// Number spotlight: tappable property chips.
+function numberWidget(data) {
+  const w = h(`<div class="ns"><div class="ns-big">${data.number.toLocaleString('en-US')}</div><div class="ns-chips"></div><p class="ns-tip">Tap a property to see why.</p><div class="ns-detail" hidden></div></div>`);
+  const chips = $('.ns-chips', w); const detail = $('.ns-detail', w);
+  data.props.forEach(([name, why]) => {
+    const c = h(`<button class="ns-chip">${escapeHTML(name)}</button>`);
+    c.addEventListener('click', () => {
+      w.querySelectorAll('.ns-chip').forEach((x) => x.classList.toggle('on', x === c));
+      detail.hidden = !why; detail.innerHTML = '';
+      if (why) detail.appendChild(renderContent(`<span><b>${escapeHTML(name)}:</b> ${escapeHTML(why)}</span>`, { base: 'text', dollar: true }));
+    });
+    chips.appendChild(c);
+  });
+  return w;
+}
+// Fun fact reactions.
+function reactWidget(data) {
+  const w = h('<div class="react"><button data-r="wow">🤯 <span>Mind-blown</span></button><button data-r="knew">🤓 <span>Knew it</span></button><button data-r="share">📤 <span>Share</span></button></div>');
+  w.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-r]'); if (!b) return;
+    if (b.dataset.r === 'share') return share(data);
+    if (w.dataset.done) return;
+    w.dataset.done = '1'; b.classList.add('on');
+    const r = b.getBoundingClientRect(); fxBurst(r.left + r.width / 2, r.top + r.height / 2, { color: ['#facc15', '#f472b6', '#60a5fa'], n: 14 });
+    engage('spark', b.dataset.r === 'wow' ? 2 : 1); gainXp(2);
+  });
+  return w;
 }
 
 // ------------------------------------------------------------------ focus: staying with a problem
@@ -1030,7 +1105,8 @@ function diffChip(data) {
   if (data.difficulty == null) return '';
   const b = bandOf(data.difficulty);
   const val = data.rated ? data.difficulty.toFixed(1) : `~${data.difficulty}`;
-  return `<span class="diff d-${b.id}" title="Difficulty ${val} out of 10${data.rated ? '' : ' (estimated)'}"><i></i>${b.name} · ${val}</span>`;
+  const dots = Math.max(1, Math.min(5, Math.round(data.difficulty / 2)));
+  return `<span class="diff d-${b.id}" title="Difficulty ${val} out of 10${data.rated ? '' : ' (estimated)'}"><span class="dmeter">${[1, 2, 3, 4, 5].map((k) => `<b class="${k <= dots ? 'on' : ''}"></b>`).join('')}</span>${b.name}</span>`;
 }
 // Elo-style skill rating: beating a problem rated above you moves you up more.
 function updateRating(data, ok) {
@@ -1233,9 +1309,10 @@ function answerBox(data, cardEl, onAnswered = null) {
     if (data.daily) setTimeout(() => toast(ok ? `Daily challenge solved! Daily streak: ${state.stats.dailyStreak}` : 'Daily challenge done — new one tomorrow'), 600);
     else if (ok && d.solved === state.settings.dailyGoal) setTimeout(() => toast(`Daily goal reached — ${d.solved} solved today!`), 700);
     cardEl.classList.add(ok ? 'solved' : 'missed');
-    const fb = h(`<div class="feedback ${ok ? 'ok' : 'no'}">${ok ? 'Correct! <span class="charge-earned">+1 ⚡</span>' : `Not quite — the answer is <b>${escapeHTML(data.answer.value)}</b>.`}${data.solutionHtml ? ' <button class="link">See solution</button>' : ''}</div>`);
+    const fb = h(`<div class="feedback ${ok ? 'ok' : 'no'}"><span class="fb-icon">${ok ? '✓' : '✕'}</span><div class="fb-text">${ok ? `${pickPraise()} <span class="charge-earned">+1 ⚡</span>` : `Not quite — the answer is <b>${escapeHTML(data.answer.value)}</b>${data.answer.labels ? `: ${escapeHTML(data.answer.labels['ABCDE'.indexOf(data.answer.value)])}` : ''}.`}${data.solutionHtml ? ` <button class="link">${data.source === 'spark' ? 'Why?' : 'See solution'}</button>` : ''}</div></div>`);
     fb.querySelector('.link')?.addEventListener('click', () => openSolution(data));
     if (!ok && data.answer.type === 'expr') { const b = fb.querySelector('b'); b.textContent = ''; b.appendChild(renderContent(`<span>$${escapeHTML(data.answer.value)}$</span>`, { base: 'text', dollar: true })); }
+    if (data.explain) { const ex = h('<div class="fb-explain"></div>'); ex.appendChild(renderContent(`<p>${escapeHTML(data.explain)}</p>`, { base: 'text', dollar: true })); fb.appendChild(ex); fb.querySelector('.link')?.remove(); }
     if (data.daily) {
       const brag = h('<button class="link brag">Share result</button>');
       brag.addEventListener('click', () => shareText(ok
@@ -1249,13 +1326,29 @@ function answerBox(data, cardEl, onAnswered = null) {
     onAnswered?.(ok);
   };
 
-  if (data.answer.type === 'choice') {
+  if (data.answer.type === 'choice' && data.answer.labels) {
+    const list = h('<div class="choice-list" role="group" aria-label="Your answer"></div>');
+    data.answer.labels.forEach((lab, i) => {
+      const L = 'ABCDE'[i];
+      const b = h(`<button class="choice-row" data-l="${L}"><b>${L}</b><span></span></button>`);
+      b.querySelector('span').appendChild(renderContent(`<span>${escapeHTML(lab)}</span>`, { base: 'text', dollar: true }));
+      b.addEventListener('click', () => {
+        list.querySelectorAll('button').forEach((x) => { x.disabled = true; if (x.dataset.l === data.answer.value) x.classList.add('right'); });
+        if (L !== data.answer.value) b.classList.add('wrong');
+        celebrate(b, L === data.answer.value, cardEl);
+        finish(L === data.answer.value);
+      });
+      list.appendChild(b);
+    });
+    box.appendChild(list);
+  } else if (data.answer.type === 'choice') {
     const row = h('<div class="choices" role="group" aria-label="Your answer"></div>');
     for (const L of ['A', 'B', 'C', 'D', 'E']) {
       const b = h(`<button class="choice">${L}</button>`);
       b.addEventListener('click', () => {
         row.querySelectorAll('button').forEach((x) => { x.disabled = true; if (x.textContent === data.answer.value) x.classList.add('right'); });
         if (L !== data.answer.value) b.classList.add('wrong');
+        celebrate(b, L === data.answer.value, cardEl);
         finish(L === data.answer.value);
       });
       row.appendChild(b);
@@ -1387,6 +1480,7 @@ const observer = new IntersectionObserver((entries) => {
       if (focusLock && focusLock.el !== e.target) endFocus('reset');
       currentEl = e.target;
       currentSince = Date.now();
+      e.target.classList.remove('enter'); void e.target.offsetWidth; e.target.classList.add('enter');
       e.target._checkOverflow?.();
       const c = state.cards.find((x) => x.el === e.target);
       if (c) markSeen(c.data.id);
@@ -1433,6 +1527,7 @@ function openSheet(title, bodyEl, cls = '', onClose = null) {
 }
 function closeSheet() {
   const cb = sheetOnClose; sheetOnClose = null; if (cb) cb();
+  if (typeof setNav === 'function') setNav('home');
   sheet.classList.remove('open'); scrim.classList.remove('open');
   sheet.style.transform = '';
   setTimeout(() => { if (!sheet.classList.contains('open')) { sheet.hidden = true; scrim.hidden = true; } }, 260);
@@ -2603,6 +2698,10 @@ function openSettings() {
   body.className = 'settings';
   let changed = false;
 
+  body.appendChild(h('<h3>Your feed style</h3>'));
+  const pp = h(personaPicker(state.settings.persona || 'student'));
+  pp.querySelectorAll('[data-persona]').forEach((b) => b.addEventListener('click', () => { applyPersona(b.dataset.persona); pp.querySelectorAll('[data-persona]').forEach((x) => x.classList.toggle('on', x === b)); toast(`Feed style: ${PERSONAS[b.dataset.persona].name}`); resetFeed(); }));
+  body.appendChild(pp);
   body.appendChild(h('<h3>Sources</h3>'));
   const srcList = h('<div class="group"></div>');
   for (const [key, src] of Object.entries(SOURCES)) {
@@ -2706,6 +2805,22 @@ function openSettings() {
 }
 
 // ------------------------------------------------------------------ onboarding
+// "What brings you here?" — tunes the mix of the For you feed.
+const PERSONAS = {
+  curious: { icon: '🤔', name: 'Just curious', desc: 'Fun facts, puzzles, visual proofs and big ideas', weights: { spark: 45, wikipedia: 16, oeis: 10, proofwiki: 6, math: 8, contest: 6, omni: 2, olympiad: 2, aops: 2 }, focusEvery: 6 },
+  student: { icon: '📚', name: 'Student', desc: 'Practice problems from easy to hard, with a mix of fun', weights: { spark: 18, math: 18, contest: 18, wikipedia: 10, proofwiki: 8, oeis: 6, omni: 6, olympiad: 6, aops: 6 }, focusEvery: 4 },
+  competitor: { icon: '🏆', name: 'Competitor', desc: 'AMC, AIME and olympiad problems first', weights: { spark: 6, contest: 22, olympiad: 14, omni: 14, aops: 12, math: 12, proofwiki: 8, wikipedia: 6, oeis: 4 }, focusEvery: 4 },
+};
+function applyPersona(id) {
+  const P = PERSONAS[id]; if (!P) return;
+  state.settings.persona = id;
+  state.settings.weights = { ...state.settings.weights, ...P.weights };
+  state.settings.focus = { ...state.settings.focus, every: P.focusEvery };
+  state.settings.sources.spark = true;
+  saveSettings();
+}
+const personaPicker = (cur) => `<div class="personas">${Object.entries(PERSONAS).map(([k, p]) => `<button class="persona ${k === cur ? 'on' : ''}" data-persona="${k}"><span>${p.icon}</span><b>${p.name}</b><small>${p.desc}</small></button>`).join('')}</div>`;
+
 function openWelcome() {
   const st = state.settings;
   const body = document.createElement('div');
@@ -2714,17 +2829,21 @@ function openWelcome() {
   const topicChips = PROBLEM_TOPICS.map((t) => `<button class="chip on" data-topic="${t}">${t}</button>`).join('');
   body.innerHTML = `
     <div class="welcome-hero"><div class="brand big">∑</div><h2>Scroll maths, not videos.</h2>
-      <p>Swipe up for the next card, tap to answer, double-tap to like. Every few cards is a <b>focus problem</b>: the feed pauses so you can really have a go.</p></div>
+      <p>Swipe up for the next card, tap to answer, double-tap to like.</p></div>
+    <h3>What brings you here?</h3>${personaPicker(st.persona || 'student')}
     <div class="welcome-tour">
-      <div><span>📜</span><b>Feed</b><small>Real contest problems, theorems and sequences</small></div>
+      <div><span>✨</span><b>Discover</b><small>Fun facts, brain teasers and proofs you can watch</small></div>
       <div><span>🎓</span><b>Learn</b><small>Courses from prealgebra to the IMO, with lectures</small></div>
       <div><span>🎮</span><b>Games</b><small>12 maths games, from Number Ninja to chess puzzles</small></div>
-      <div><span>⚡</span><b>Charges</b><small>Every right answer earns ⚡ to spend on games</small></div>
+      <div><span>⚔️</span><b>Numeria</b><small>A maths adventure game with real contest problems</small></div>
     </div>
+    <details class="welcome-more"><summary>Choose sources and topics</summary>
     <h3>What do you want to see?</h3><div class="chips">${srcChips}</div>
-    <h3>Favourite topics</h3><div class="chips">${topicChips}</div>
+    <h3>Favourite topics</h3><div class="chips">${topicChips}</div></details>
     <button class="btn wide start">Start scrolling</button>`;
   body.querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => c.classList.toggle('on')));
+  let persona = st.persona || 'student';
+  body.querySelectorAll('[data-persona]').forEach((b) => b.addEventListener('click', () => { persona = b.dataset.persona; body.querySelectorAll('[data-persona]').forEach((x) => x.classList.toggle('on', x === b)); sound('click'); }));
   let started = false;
   const finish = () => {
     if (started) return;
@@ -2734,8 +2853,10 @@ function openWelcome() {
     const topics = [...body.querySelectorAll('[data-topic].on')].map((c) => c.dataset.topic);
     st.topics = topics.length ? topics : [...PROBLEM_TOPICS];
     saveSettings();
+    applyPersona(persona);
     store.set('onboarded', true);
     renderTabs(); resetFeed();
+    if (!store.get('coached', false)) setTimeout(showCoach, 700);
   };
   finish.onReplace = true;
   $('.start', body).addEventListener('click', () => { finish(); closeSheet(); });
@@ -2764,6 +2885,38 @@ document.addEventListener('click', (e) => {
   document.body.appendChild(box);
 }, true);
 
+// ------------------------------------------------------------------ first-run tips
+function showCoach() {
+  store.set('coached', true);
+  const steps = [
+    { icon: '👆', title: 'Swipe up', text: 'for the next card. Every card is a problem, a fact, a proof or a puzzle.', cls: 'swipe' },
+    { icon: '🅰️', title: 'Tap an answer', text: 'to check it. Right answers earn XP and ⚡ for games.', cls: 'tap' },
+    { icon: '❤️', title: 'Double-tap', text: 'to like a card. Use the buttons on the right to save, share or see the solution.', cls: 'like' },
+  ];
+  let i = 0;
+  const box = h('<div class="coach" role="dialog" aria-label="Tips"><div class="coach-card"><div class="coach-anim"></div><b class="coach-title"></b><p class="coach-text"></p><div class="coach-dots"></div><button class="btn wide coach-next">Next</button><button class="link coach-skip">Skip</button></div></div>');
+  const draw = () => {
+    const st = steps[i];
+    $('.coach-anim', box).className = `coach-anim ${st.cls}`; $('.coach-anim', box).textContent = st.icon;
+    $('.coach-title', box).textContent = st.title; $('.coach-text', box).textContent = st.text;
+    $('.coach-dots', box).innerHTML = steps.map((_, j) => `<i class="${j === i ? 'on' : ''}"></i>`).join('');
+    $('.coach-next', box).textContent = i === steps.length - 1 ? 'Let’s go!' : 'Next';
+  };
+  $('.coach-next', box).addEventListener('click', () => { if (++i >= steps.length) box.remove(); else draw(); });
+  $('.coach-skip', box).addEventListener('click', () => box.remove());
+  draw();
+  document.body.appendChild(box);
+}
+
+// ------------------------------------------------------------------ bottom navigation
+function setNav(id) { document.querySelectorAll('.bottombar [data-nav]').forEach((b) => b.classList.toggle('on', b.dataset.nav === id)); }
+document.querySelectorAll('.bottombar [data-nav]').forEach((b) => b.addEventListener('click', () => {
+  const id = b.dataset.nav; sound('click');
+  if (id === 'home') { closeSheet(); if (state.tab !== 'mix') switchTab('mix'); else feed.scrollTo({ top: 0, behavior: 'smooth' }); setNav('home'); }
+  if (id === 'learn') { openLearn(learnCtx); setNav('learn'); }
+  if (id === 'games') { openGames(gameCtx); setNav('games'); }
+}));
+$('#profileBtn').addEventListener('click', () => setNav('me'));
 $('#profileBtn').addEventListener('click', openProfile);
 $('#levelBtn').addEventListener('click', openProgress);
 $('#chestBtn').addEventListener('click', openChest);

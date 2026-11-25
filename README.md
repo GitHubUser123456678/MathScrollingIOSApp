@@ -6,6 +6,7 @@ An endless, swipe-up feed of maths — like TikTok, but every "video" is a conte
 
 | Tab | What | Size | Difficulty |
 |---|---|---|---|
+| ✨ Discover | Hand-made cards for everyone: 40 fun facts, 30 brain teasers with explanations, 6 tap-through visual proofs, and a "number spotlight" for any number | always fresh | easy |
 | Community | Problems, facts and questions posted by people using the app | grows | set by the poster |
 | AMC/AIME | AMC 8/10/12 and AIME problems with AoPS Wiki solutions | ~5,000 | estimated |
 | MATH | Competition problems with worked solutions (MATH dataset) | 12,500 | rated, levels 1–5 |
@@ -21,6 +22,8 @@ Every problem is placed on one 1–10 difficulty scale (AMC 10/12 ≈ 2–4, AIM
 Why the mirrors? AoPS puts every automated request through a bot check, and ProofWiki and the OEIS don't allow other websites/apps to read them. Hugging Face hosts public copies of their content with an open API, so the app reads those instead. Every card's **Source** button takes you to the original.
 
 **Features**
+- **Made for everyone**: on first open you pick *Just curious*, *Student* or *Competitor*, which tunes the mix (curious gets more Discover cards, competitors get AMC/AIME and olympiad problems first). Change it any time in Settings → Your feed style. A three-step tutorial shows how to swipe, answer and like.
+- **Bottom navigation** (Home · Learn · ＋ Post · Games · Me), and redesigned cards: a big faint symbol for each kind of card, a 5-bar difficulty meter, larger answer buttons, bursts and confetti when you're right, a shake when you're wrong, and an explanation right under the answer.
 - Swipe one card at a time, TikTok-style. Double-tap or tap the heart to like.
 - Tap A–E or type an answer and it's checked instantly; streak counter for answers in a row.
 - **Diagrams and pictures**: Asymptote diagrams in AMC/AIME and MATH problems are drawn in the app (a built-in Asymptote interpreter), olympiad and forum problems show their images, Wikipedia cards keep their main picture, and tapping any picture opens it full screen.
